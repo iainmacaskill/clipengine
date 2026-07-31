@@ -53,6 +53,17 @@ class CaptionConfig:
 class TwitchConfig:
     client_id: str = ""
     client_secret: str = ""
+    user_token: str = ""  # user OAuth token with clips:edit (live-mode clip creation)
+
+
+@dataclass
+class LiveConfig:
+    baseline_s: float = 300.0     # rolling chat-rate baseline span
+    window_s: float = 10.0        # spike measurement window
+    z_threshold: float = 3.0      # spike = rate this many std-devs above baseline
+    min_rate: float = 1.0         # absolute floor, messages/sec
+    cooldown_s: float = 120.0     # min gap between captures
+    min_baseline_s: float = 60.0  # warm-up before any trigger
 
 
 @dataclass
@@ -103,6 +114,7 @@ class Config:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    live: LiveConfig = field(default_factory=LiveConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
     review_db: str = os.path.expanduser("~/.clipengine/review.db")
@@ -126,6 +138,7 @@ def load(path: str | None = None) -> Config:
     env = os.environ.get
     cfg.twitch.client_id = env("CLIPENGINE_TWITCH_CLIENT_ID", cfg.twitch.client_id)
     cfg.twitch.client_secret = env("CLIPENGINE_TWITCH_CLIENT_SECRET", cfg.twitch.client_secret)
+    cfg.twitch.user_token = env("CLIPENGINE_TWITCH_USER_TOKEN", cfg.twitch.user_token)
     cfg.youtube.client_id = env("CLIPENGINE_YT_CLIENT_ID", cfg.youtube.client_id)
     cfg.youtube.client_secret = env("CLIPENGINE_YT_CLIENT_SECRET", cfg.youtube.client_secret)
     cfg.tiktok.client_key = env("CLIPENGINE_TT_CLIENT_KEY", cfg.tiktok.client_key)

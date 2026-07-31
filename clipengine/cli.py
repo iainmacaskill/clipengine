@@ -128,6 +128,37 @@ def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_live(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .live.irc import chat_messages
+    from .live.monitor import default_capture, run_live
+
+    capture = None
+    if not args.dry_run:
+        capture = default_capture(cfg, args.streamer, args.output_dir)
+
+    def on_event(event) -> None:
+        if event.error:
+            print(f"spike z={event.z:.1f} - capture FAILED: {event.error}", file=sys.stderr)
+        elif event.clip_path:
+            print(f"spike z={event.z:.1f} rate={event.rate:.1f}/s -> {event.clip_path}")
+        else:
+            print(f"spike z={event.z:.1f} rate={event.rate:.1f}/s (dry run)")
+
+    mode = "dry run - detecting only" if args.dry_run else "capturing clips"
+    print(f"monitoring #{args.streamer} live chat ({mode}; ctrl-c to stop)", file=sys.stderr)
+    try:
+        events = run_live(
+            args.streamer, cfg, chat_messages(args.streamer), args.output_dir,
+            capture=capture, on_event=on_event, max_events=args.max_clips,
+        )
+    except KeyboardInterrupt:
+        print("\nstopped", file=sys.stderr)
+        return 0
+    captured = sum(1 for e in events if e.clip_path)
+    print(f"{len(events)} spikes, {captured} clips -> {args.output_dir}/live_events.jsonl")
+    return 0
+
+
 def _cmd_suggest(args: argparse.Namespace, cfg: config.Config) -> int:
     import json
     import os
@@ -697,6 +728,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--privacy", help="youtube: private|unlisted|public; tiktok: SELF_ONLY|...")
     p.add_argument("--skip-music-check", action="store_true")
     p.set_defaults(func=_cmd_publish)
+
+    p = sub.add_parser("live", help="monitor a live stream's chat; capture clips on hype spikes")
+    p.add_argument("streamer", help="streamer login (must be on the roster)")
+    p.add_argument("-o", "--output-dir", required=True)
+    p.add_argument("--dry-run", action="store_true", help="detect spikes without creating clips")
+    p.add_argument("--max-clips", type=int, help="stop after this many spikes")
+    p.set_defaults(func=_cmd_live)
 
     p = sub.add_parser("suggest", help="LLM hook/title/hashtags for an existing clip")
     p.add_argument("video")

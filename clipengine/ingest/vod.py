@@ -65,6 +65,26 @@ def build_opts(
     return opts
 
 
+def download_clip_url(url: str, dst_path: str) -> str:
+    """Download a Twitch clip (or any yt-dlp-supported URL) to ``dst_path``.
+
+    Used by live mode to fetch clips created via the Create Clip API.
+    """
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as e:
+        raise RuntimeError(
+            "yt-dlp not installed - run: pip install 'clipengine[download]'"
+        ) from e
+
+    opts = build_opts(dst_path)
+    with YoutubeDL(opts) as ydl:
+        code = ydl.download([url])
+    if code != 0 or not os.path.exists(dst_path):
+        raise RuntimeError(f"clip download failed for {url}")
+    return dst_path
+
+
 def download_vod(
     vod: str,
     dst_path: str,

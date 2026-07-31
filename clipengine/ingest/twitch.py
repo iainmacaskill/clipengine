@@ -95,6 +95,59 @@ class TwitchClient:
         clips.sort(key=lambda c: -c["views"])
         return clips
 
+    def _user_headers(self) -> dict[str, str]:
+        """Headers for endpoints requiring a user (not app) access token."""
+        if not self.cfg.user_token:
+            raise ValueError(
+                "Twitch user token missing - clip creation needs a user OAuth token "
+                "with the clips:edit scope (set CLIPENGINE_TWITCH_USER_TOKEN)"
+            )
+        return {
+            "Client-Id": self.cfg.client_id,
+            "Authorization": f"Bearer {self.cfg.user_token}",
+        }
+
+    def create_clip(self, login: str) -> str:
+        """Create a Twitch clip of the streamer's live broadcast -> clip id.
+
+        Twitch captures roughly the preceding 90 seconds server-side. The clip
+        takes ~15s to process - poll wait_clip() for the playable URL.
+        """
+        uid = self.user_id(login)
+        resp = httpx.post(
+            _HELIX + "/clips", params={"broadcaster_id": uid}, headers=self._user_headers()
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        if not data:
+            raise RuntimeError(f"clip creation returned no clip for {login}")
+        return data[0]["id"]
+
+    def get_clip(self, clip_id: str) -> dict | None:
+        """Clip metadata (url, duration, ...) once processed; None while pending."""
+        resp = httpx.get(
+            _HELIX + "/clips", params={"id": clip_id}, headers=self._auth_headers()
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return data[0] if data else None
+
+    def wait_clip(
+        self, clip_id: str, timeout_s: float = 60.0, poll_s: float = 3.0, sleep=None
+    ) -> dict:
+        """Poll until a created clip is processed and playable."""
+        import time as _time
+
+        sleep = sleep or _time.sleep
+        waited = 0.0
+        while waited <= timeout_s:
+            clip = self.get_clip(clip_id)
+            if clip is not None:
+                return clip
+            sleep(poll_s)
+            waited += poll_s
+        raise TimeoutError(f"clip {clip_id} not processed after {timeout_s}s")
+
     def download_vod(self, vod_id: str, dst_path: str) -> str:
         """Download a VOD's video via yt-dlp (see ingest.vod for routes/auth notes)."""
         from .vod import download_vod

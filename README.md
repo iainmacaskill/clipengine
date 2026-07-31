@@ -56,6 +56,11 @@ clipengine detect vod.mp4 --chat chat.jsonl
 clipengine process vod.mp4 --chat chat.jsonl --streamer somestreamer -o clips/ \
     --top 5 --queue-platform youtube --account mychannel
 
+# LIVE mode: watch a stream's chat, capture Twitch clips on hype spikes
+# (clip creation needs CLIPENGINE_TWITCH_USER_TOKEN with the clips:edit scope)
+clipengine live somestreamer -o live_clips/ --dry-run     # detect only, calibrate
+clipengine live somestreamer -o live_clips/               # capture + download
+
 # human review: import the batch, approve (with real titles) into the publish
 # queue or reject with a reason; stats tracks the MVP >=50% pass-rate criterion
 clipengine review import clips/manifest.json
@@ -117,6 +122,7 @@ clipengine/
                   weight tuning against viewer-clipped ground truth
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
   package/        ASS captions + music-DMCA screening + LLM hooks/titles/hashtags
+  live/           live mode: IRC chat monitor, spike detector, clip capture
   publish/        YouTube resumable upload + TikTok direct post + OAuth tokens
                   + scheduling queue (posting windows, spacing, daily caps)
 ```
