@@ -45,6 +45,14 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .ingest.chat_replay import download_chat
+
+    count = download_chat(args.vod_id, args.output)
+    print(f"{count} messages -> {args.output}")
+    return 0
+
+
 def _cmd_vods(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.twitch import TwitchClient
 
@@ -72,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--no-captions", action="store_true")
     p.set_defaults(func=_cmd_render)
+
+    p = sub.add_parser("chat", help="download a VOD's chat replay to JSONL")
+    p.add_argument("vod_id")
+    p.add_argument("-o", "--output", required=True)
+    p.set_defaults(func=_cmd_chat)
 
     p = sub.add_parser("vods", help="list a streamer's recent VODs")
     p.add_argument("streamer")

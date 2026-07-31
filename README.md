@@ -20,15 +20,19 @@ creator-reward programmes on an own-brand, permissioned clip network.
 Pre-MVP. Product plan drafted; pipeline scaffolded as a Python package with working
 detection (chat velocity + emote spikes + audio energy, fused into ranked windows),
 edit (frame-accurate trim, 9:16 facecam-top layout), and captioning (opus-style ASS)
-stages. Twitch VOD/chat download and TikTok/YouTube publishing are stubs pending API
-credentials/audit. Next: rerun detection on real VOD footage from a clip-permissive
-streamer and compare picks against the streamer's own posted clips.
+stages, plus a VOD chat replay downloader (GQL persisted-query route, tested against
+mocked responses). Twitch VOD video download and TikTok/YouTube publishing remain
+stubs pending API credentials/audit. Next: run detection on real VOD footage from a
+clip-permissive streamer and compare picks against the streamer's own posted clips.
 
 ## Quick start
 
 ```bash
 pip install -e ".[dev]"        # + ".[asr]" for faster-whisper captions
 pytest
+
+# download a VOD's chat replay (the strongest detection signal)
+clipengine chat 2274633451 -o chat.jsonl
 
 # score a VOD (chat log optional but strongly recommended)
 clipengine detect vod.mp4 --chat chat.jsonl

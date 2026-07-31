@@ -70,13 +70,11 @@ class TwitchClient:
         raise NotImplementedError("VOD download not implemented yet")
 
     def download_chat(self, vod_id: str, dst_path: str) -> str:
-        """Download the VOD chat replay and normalise to JSONL. TODO.
+        """Download the VOD chat replay to the pipeline's JSONL format."""
+        from .chat_replay import download_chat
 
-        Twitch's chat replay is served via an undocumented GQL endpoint; established
-        open-source tooling (e.g. TwitchDownloader chat mode) is the pragmatic route.
-        Normalise into the JSONL shape parse_chat_jsonl expects.
-        """
-        raise NotImplementedError("chat download not implemented yet")
+        download_chat(vod_id, dst_path)
+        return dst_path
 
 
 def normalise_chat_json(raw_comments: list[dict], dst_path: str) -> str:
