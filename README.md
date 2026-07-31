@@ -17,9 +17,45 @@ creator-reward programmes on an own-brand, permissioned clip network.
 
 ## Status
 
-Pre-MVP. Product plan drafted; pipeline mechanics validated end to end on synthetic
-footage. Next: rerun the spike on real VOD footage from a clip-permissive streamer
-and compare detector picks against the streamer's own posted clips.
+Pre-MVP. Product plan drafted; pipeline scaffolded as a Python package with working
+detection (chat velocity + emote spikes + audio energy, fused into ranked windows),
+edit (frame-accurate trim, 9:16 facecam-top layout), and captioning (opus-style ASS)
+stages. Twitch VOD/chat download and TikTok/YouTube publishing are stubs pending API
+credentials/audit. Next: rerun detection on real VOD footage from a clip-permissive
+streamer and compare picks against the streamer's own posted clips.
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"        # + ".[asr]" for faster-whisper captions
+pytest
+
+# score a VOD (chat log optional but strongly recommended)
+clipengine detect vod.mp4 --chat chat.jsonl
+
+# render one window as a captioned 9:16 short (facecam ROI in source pixels)
+clipengine render vod.mp4 --start 3721 --end 3796 --facecam 24,24,420,236 -o clip.mp4
+
+# list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
+clipengine vods somestreamer
+```
+
+Chat log format is JSONL: `{"offset": seconds_from_start, "user": "...", "text": "..."}`.
+
+## Package layout
+
+```
+clipengine/
+  models.py       shared dataclasses (candidates, transcript, signals, ...)
+  config.py       tunable pipeline config (TOML + env overrides)
+  pipeline.py     batch orchestration: detect_candidates / render_candidate
+  cli.py          command-line entry point
+  ingest/         Twitch Helix client (VOD listing works; downloads TODO)
+  detect/         chat + audio signal extraction, fusion, optional ASR
+  edit/           ffmpeg trim / vertical reformat / subtitle burn
+  package/        ASS caption generation
+  publish/        YouTube + TikTok stubs (Phase 2)
+```
 
 ## Pipeline overview
 
