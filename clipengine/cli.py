@@ -45,6 +45,21 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_vod(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .ingest.vod import download_vod
+
+    out = download_vod(
+        args.vod_id,
+        args.output,
+        max_height=args.max_height,
+        start=args.start,
+        end=args.end,
+        cookies_file=args.cookies,
+    )
+    print(out)
+    return 0
+
+
 def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.chat_replay import download_chat
 
@@ -80,6 +95,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--no-captions", action="store_true")
     p.set_defaults(func=_cmd_render)
+
+    p = sub.add_parser("vod", help="download a VOD's video (optionally a time slice)")
+    p.add_argument("vod_id", help="VOD id or twitch.tv/videos/... URL")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--max-height", type=int, default=1080)
+    p.add_argument("--start", type=float, help="slice start (seconds)")
+    p.add_argument("--end", type=float, help="slice end (seconds)")
+    p.add_argument("--cookies", help="browser cookies file (sub-only VODs)")
+    p.set_defaults(func=_cmd_vod)
 
     p = sub.add_parser("chat", help="download a VOD's chat replay to JSONL")
     p.add_argument("vod_id")

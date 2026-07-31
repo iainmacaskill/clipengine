@@ -10,7 +10,8 @@ dependencies = [
 
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.0"]
-dev = ["pytest>=8.0", "ruff>=0.4"]
+download = ["yt-dlp>=2024.4"]
+dev = ["pytest>=8.0", "ruff>=0.4", "yt-dlp>=2024.4"]
 
 [project.scripts]
 clipengine = "clipengine.cli:main"

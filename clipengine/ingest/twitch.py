@@ -61,13 +61,10 @@ class TwitchClient:
         return resp.json()["data"]
 
     def download_vod(self, vod_id: str, dst_path: str) -> str:
-        """Download a VOD's video. TODO.
+        """Download a VOD's video via yt-dlp (see ingest.vod for routes/auth notes)."""
+        from .vod import download_vod
 
-        Routes, in preference order:
-        1. streamer-authorised download via their own OAuth grant (Model A/C opt-in)
-        2. yt-dlp against the VOD URL (simplest; respects sub-only restrictions)
-        """
-        raise NotImplementedError("VOD download not implemented yet")
+        return download_vod(vod_id, dst_path)
 
     def download_chat(self, vod_id: str, dst_path: str) -> str:
         """Download the VOD chat replay to the pipeline's JSONL format."""
