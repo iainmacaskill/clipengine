@@ -81,6 +81,11 @@ class ScheduleConfig:
 
 
 @dataclass
+class AnalyticsConfig:
+    stats_db: str = os.path.expanduser("~/.clipengine/stats.db")
+
+
+@dataclass
 class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     edit: EditConfig = field(default_factory=EditConfig)
@@ -89,6 +94,7 @@ class Config:
     youtube: YouTubeConfig = field(default_factory=YouTubeConfig)
     tiktok: TikTokConfig = field(default_factory=TikTokConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
 

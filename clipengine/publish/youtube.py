@@ -22,7 +22,12 @@ from .tokens import TokenSet, TokenStore, valid_access_token
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
-SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+# upload + readonly: readonly covers the stats pulls in analytics
+SCOPE = (
+    "https://www.googleapis.com/auth/youtube.upload "
+    "https://www.googleapis.com/auth/youtube.readonly"
+)
 _CATEGORY_GAMING = "20"
 
 
@@ -158,3 +163,31 @@ class YouTubeClient:
         if "id" not in body:
             raise RuntimeError(f"YouTube upload response missing id: {body}")
         return body["id"]
+
+    # -- stats ------------------------------------------------------------
+
+    def stats(self, video_ids: list[str]) -> dict[str, dict]:
+        """Fetch per-video statistics -> {video_id: {views, likes, comments}}.
+
+        videos.list costs 1 quota unit per call (50 ids/call) - negligible next
+        to uploads.
+        """
+        token = valid_access_token(self.store, self._refresh)
+        out: dict[str, dict] = {}
+        for i in range(0, len(video_ids), 50):
+            chunk = video_ids[i : i + 50]
+            resp = self.http.get(
+                VIDEOS_URL,
+                params={"part": "statistics", "id": ",".join(chunk)},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            for item in resp.json().get("items", []):
+                s = item.get("statistics", {})
+                out[item["id"]] = {
+                    "views": int(s.get("viewCount", 0)),
+                    "likes": int(s.get("likeCount", 0)),
+                    "comments": int(s.get("commentCount", 0)),
+                    "shares": 0,  # not exposed by the API
+                }
+        return out

@@ -335,6 +335,56 @@ def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_stats(args: argparse.Namespace, cfg: config.Config) -> int:
+    from . import analytics
+    from .publish.scheduler import Queue
+
+    with Queue(cfg.schedule.queue_db) as queue, analytics.StatsStore(
+        cfg.analytics.stats_db
+    ) as store:
+        if args.stats_action == "sync":
+            fetchers = {}
+            if cfg.youtube.client_id:
+                from .publish.youtube import YouTubeClient
+
+                yt = YouTubeClient(
+                    cfg.youtube.client_id, cfg.youtube.client_secret, cfg.youtube.token_file
+                )
+                fetchers["youtube"] = yt.stats
+            if cfg.tiktok.client_key:
+                from .publish.tiktok import TikTokClient
+
+                tt = TikTokClient(
+                    cfg.tiktok.client_key, cfg.tiktok.client_secret, cfg.tiktok.token_file
+                )
+                fetchers["tiktok"] = tt.video_stats
+            if not fetchers:
+                print("no platform credentials configured - nothing to sync", file=sys.stderr)
+                return 1
+            count = analytics.sync(queue, store, fetchers)
+            print(f"{count} snapshots recorded")
+        else:  # report
+            rows = analytics.report(queue, store)
+            if not rows:
+                print("no published posts yet")
+                return 0
+            for r in rows:
+                print(
+                    f"{r.views:>9}v {r.likes:>7}l  {r.platform}/{r.account}  "
+                    f"#{r.post_id} {r.title[:44]}"
+                )
+            print()
+            for (platform, account), t in analytics.account_totals(rows).items():
+                print(
+                    f"{platform}/{account}: {t['posts']} posts, "
+                    f"{t['views']} views, {t['likes']} likes"
+                )
+            if args.csv:
+                analytics.write_csv(rows, args.csv)
+                print(f"\ncsv -> {args.csv}")
+    return 0
+
+
 def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
     from .roster import PermissionError_, Roster
 
@@ -460,6 +510,14 @@ def main(argv: list[str] | None = None) -> int:
     qr.add_argument("--dry-run", action="store_true")
     qr.set_defaults(func=_cmd_queue)
     p.set_defaults(func=_cmd_queue)
+
+    p = sub.add_parser("stats", help="performance analytics for published posts")
+    ssub = p.add_subparsers(dest="stats_action", required=True)
+    ss = ssub.add_parser("sync", help="snapshot current stats for all published posts")
+    ss.set_defaults(func=_cmd_stats)
+    sr = ssub.add_parser("report", help="latest metrics per post + account totals")
+    sr.add_argument("--csv", help="also write the report to this CSV path")
+    sr.set_defaults(func=_cmd_stats)
 
     p = sub.add_parser("roster", help="manage the streamer permission roster")
     rsub = p.add_subparsers(dest="roster_action", required=True)

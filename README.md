@@ -67,6 +67,10 @@ clipengine queue add youtube clip.mp4 --account mychannel --title "Insane clutch
 clipengine queue list
 clipengine queue run          # publishes everything due - run from cron every ~15min
 
+# performance loop: snapshot stats for published posts, then report
+clipengine stats sync         # cron this daily (or more often for velocity data)
+clipengine stats report --csv performance.csv
+
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
 ```
@@ -79,6 +83,7 @@ Chat log format is JSONL: `{"offset": seconds_from_start, "user": "...", "text":
 clipengine/
   models.py       shared dataclasses (candidates, transcript, signals, ...)
   roster.py       streamer permission roster (SQLite) - gates all ingestion
+  analytics.py    performance snapshots + reporting for published posts
   config.py       tunable pipeline config (TOML + env overrides)
   pipeline.py     batch orchestration: detect_candidates / render_candidate
   cli.py          command-line entry point

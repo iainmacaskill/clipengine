@@ -23,8 +23,9 @@ from .tokens import TokenSet, TokenStore, valid_access_token
 TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
 INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
+QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
-SCOPE = "video.publish"
+SCOPE = "video.publish,video.list"  # video.list covers the stats pulls in analytics
 
 # chunk rules per API docs: 5-64 MB per chunk, final chunk may be smaller;
 # files up to 64 MB may be sent as a single chunk
@@ -185,10 +186,41 @@ class TikTokClient:
                 headers={"Authorization": f"Bearer {token}"},
             )
             resp.raise_for_status()
-            status = (resp.json().get("data") or {}).get("status", "")
+            data = resp.json().get("data") or {}
+            status = data.get("status", "")
             if status == "PUBLISH_COMPLETE":
-                return publish_id
+                # the public video id arrives in this (misspelled by the API)
+                # field; analytics needs it - fall back to publish_id otherwise
+                public_ids = data.get("publicaly_available_post_id") or []
+                return str(public_ids[0]) if public_ids else publish_id
             if status in ("FAILED", "PUBLISH_FAILED"):
                 raise RuntimeError(f"TikTok publish failed: {resp.json()}")
             time.sleep(self.poll_interval_s)
         raise TimeoutError(f"TikTok publish {publish_id} still processing - check later")
+
+    # -- stats ------------------------------------------------------------
+
+    def video_stats(self, video_ids: list[str]) -> dict[str, dict]:
+        """Fetch per-video statistics -> {video_id: {views, likes, comments, shares}}.
+
+        Uses /v2/video/query/ (video.list scope) with id filters, 20 ids/call.
+        """
+        token = valid_access_token(self.store, self._refresh)
+        out: dict[str, dict] = {}
+        for i in range(0, len(video_ids), 20):
+            chunk = video_ids[i : i + 20]
+            resp = self.http.post(
+                QUERY_URL,
+                params={"fields": "id,view_count,like_count,comment_count,share_count"},
+                json={"filters": {"video_ids": chunk}},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            for v in (resp.json().get("data") or {}).get("videos", []):
+                out[str(v["id"])] = {
+                    "views": int(v.get("view_count", 0)),
+                    "likes": int(v.get("like_count", 0)),
+                    "comments": int(v.get("comment_count", 0)),
+                    "shares": int(v.get("share_count", 0)),
+                }
+        return out
