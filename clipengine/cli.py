@@ -109,6 +109,26 @@ def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_music_check(args: argparse.Namespace, cfg: config.Config) -> int:
+    import os
+
+    from .detect.audio import extract_wav
+    from .package.music import check, mute_segments
+
+    os.makedirs(cfg.work_dir, exist_ok=True)
+    wav = extract_wav(args.video, os.path.join(cfg.work_dir, "music_check.wav"))
+    segments = check(wav, threshold=args.threshold)
+    if not segments:
+        print("no music-likely segments found")
+        return 0
+    for s in segments:
+        print(f"music-likely: {s.start:7.1f} - {s.end:7.1f}s  score={s.score:.2f}")
+    if args.mute:
+        out = mute_segments(args.video, args.mute, segments)
+        print(f"muted -> {out}")
+    return 0
+
+
 def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
     from .roster import PermissionError_, Roster
 
@@ -191,6 +211,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--streamer", required=True, help="streamer login (checked against roster)")
     p.add_argument("-o", "--output", required=True)
     p.set_defaults(func=_cmd_chat)
+
+    p = sub.add_parser("music-check", help="screen a clip for music-likely segments (DMCA)")
+    p.add_argument("video")
+    p.add_argument("--threshold", type=float, default=0.30)
+    p.add_argument("--mute", metavar="OUT", help="write a copy with flagged segments muted")
+    p.set_defaults(func=_cmd_music_check)
 
     p = sub.add_parser("roster", help="manage the streamer permission roster")
     rsub = p.add_subparsers(dest="roster_action", required=True)

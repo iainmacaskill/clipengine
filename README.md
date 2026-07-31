@@ -50,6 +50,9 @@ clipengine detect vod.mp4 --chat chat.jsonl
 clipengine render vod.mp4 --start 3721 --end 3796 -o clip.mp4
 clipengine facecam vod.mp4        # inspect the detection on its own
 
+# DMCA screen: flag music-likely segments; optionally write a muted copy
+clipengine music-check clip.mp4 --mute clip_safe.mp4
+
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
 ```
@@ -68,7 +71,7 @@ clipengine/
   ingest/         Twitch Helix client (VOD listing works; downloads TODO)
   detect/         chat + audio signal extraction, fusion, optional ASR
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
-  package/        ASS caption generation
+  package/        ASS caption generation + music-DMCA screening/muting
   publish/        YouTube + TikTok stubs (Phase 2)
 ```
 
