@@ -72,6 +72,15 @@ class TikTokConfig:
 
 
 @dataclass
+class ScheduleConfig:
+    queue_db: str = os.path.expanduser("~/.clipengine/queue.db")
+    windows: list[str] = field(default_factory=lambda: ["11:00-14:00", "17:00-22:00"])
+    min_spacing_hours: float = 3.0
+    daily_cap: int = 4
+    tz: str = "UTC"
+
+
+@dataclass
 class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     edit: EditConfig = field(default_factory=EditConfig)
@@ -79,6 +88,7 @@ class Config:
     twitch: TwitchConfig = field(default_factory=TwitchConfig)
     youtube: YouTubeConfig = field(default_factory=YouTubeConfig)
     tiktok: TikTokConfig = field(default_factory=TikTokConfig)
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
 

@@ -235,6 +235,106 @@ def _cmd_publish(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _rules(cfg: config.Config):
+    from .publish.scheduler import ScheduleRules
+
+    return ScheduleRules(
+        windows=cfg.schedule.windows,
+        min_spacing_hours=cfg.schedule.min_spacing_hours,
+        daily_cap=cfg.schedule.daily_cap,
+        tz=cfg.schedule.tz,
+    )
+
+
+def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .publish.scheduler import Queue, run_due
+
+    with Queue(cfg.schedule.queue_db) as queue:
+        if args.queue_action == "add":
+            post = queue.add(
+                args.platform,
+                args.account,
+                args.video,
+                args.title,
+                _rules(cfg),
+                description=args.description or "",
+                tags=args.tags or "",
+                privacy=args.privacy or "",
+            )
+            print(f"#{post.id} scheduled {post.scheduled_at} [{post.platform}/{post.account}]")
+        elif args.queue_action == "list":
+            posts = queue.list(status=args.status)
+            if not posts:
+                print("queue is empty")
+            for p in posts:
+                marker = {"scheduled": " ", "published": "+", "failed": "!", "cancelled": "x"}
+                print(
+                    f"{marker.get(p.status, '?')} #{p.id:<4} {p.scheduled_at}  "
+                    f"{p.platform}/{p.account}  {p.status:<9} {p.title[:40]}"
+                )
+        elif args.queue_action == "cancel":
+            post = queue.cancel(args.id)
+            print(f"#{post.id} cancelled")
+        else:  # run
+            def screen(video_path: str) -> bool:
+                return _screen_for_music(video_path, cfg)
+
+            def publish_youtube(post) -> str:
+                from .publish.youtube import UploadRequest, YouTubeClient
+
+                client = YouTubeClient(
+                    cfg.youtube.client_id, cfg.youtube.client_secret, cfg.youtube.token_file
+                )
+                title = post.title if "#shorts" in post.title.lower() else post.title + " #Shorts"
+                return client.upload(
+                    UploadRequest(
+                        video_path=post.video_path,
+                        title=title,
+                        description=post.description,
+                        tags=post.tags.split(",") if post.tags else [],
+                        privacy=post.privacy or "private",
+                    )
+                )
+
+            def publish_tiktok(post) -> str:
+                from .publish.tiktok import PostRequest, TikTokClient
+
+                client = TikTokClient(
+                    cfg.tiktok.client_key, cfg.tiktok.client_secret, cfg.tiktok.token_file
+                )
+                return client.post(
+                    PostRequest(
+                        video_path=post.video_path,
+                        caption=post.title,
+                        privacy_level=post.privacy or cfg.tiktok.privacy_level,
+                    )
+                )
+
+            due = queue.due()
+            if not due:
+                print("nothing due")
+                return 0
+            if args.dry_run:
+                for p in due:
+                    print(f"would publish #{p.id} {p.platform}/{p.account}: {p.title}")
+                return 0
+            results = run_due(
+                queue,
+                {"youtube": publish_youtube, "tiktok": publish_tiktok},
+                screen,
+            )
+            for post, external_id in results:
+                if external_id:
+                    print(f"published #{post.id} -> {external_id}")
+                else:
+                    print(
+                        f"attempt failed #{post.id} ({post.status}, "
+                        f"attempt {post.attempts}): {post.last_error}",
+                        file=sys.stderr,
+                    )
+    return 0
+
+
 def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
     from .roster import PermissionError_, Roster
 
@@ -338,6 +438,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--threshold", type=float, default=0.30)
     p.add_argument("--mute", metavar="OUT", help="write a copy with flagged segments muted")
     p.set_defaults(func=_cmd_music_check)
+
+    p = sub.add_parser("queue", help="scheduled publishing queue")
+    qsub = p.add_subparsers(dest="queue_action", required=True)
+    qa = qsub.add_parser("add", help="queue a clip; a slot is assigned automatically")
+    qa.add_argument("platform", choices=["youtube", "tiktok"])
+    qa.add_argument("video")
+    qa.add_argument("--account", required=True, help="account label (spacing/caps are per account)")
+    qa.add_argument("--title", required=True)
+    qa.add_argument("--description")
+    qa.add_argument("--tags", help="comma-separated (YouTube)")
+    qa.add_argument("--privacy")
+    qa.set_defaults(func=_cmd_queue)
+    ql = qsub.add_parser("list")
+    ql.add_argument("--status", choices=["scheduled", "published", "failed", "cancelled"])
+    ql.set_defaults(func=_cmd_queue)
+    qc = qsub.add_parser("cancel")
+    qc.add_argument("id", type=int)
+    qc.set_defaults(func=_cmd_queue)
+    qr = qsub.add_parser("run", help="publish everything due (cron this)")
+    qr.add_argument("--dry-run", action="store_true")
+    qr.set_defaults(func=_cmd_queue)
+    p.set_defaults(func=_cmd_queue)
 
     p = sub.add_parser("roster", help="manage the streamer permission roster")
     rsub = p.add_subparsers(dest="roster_action", required=True)

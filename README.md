@@ -61,6 +61,12 @@ clipengine auth youtube                 # prints consent URL; re-run with --code
 clipengine publish youtube clip.mp4 --title "Insane clutch" --privacy unlisted
 clipengine publish tiktok clip.mp4 --title "insane clutch #gaming"
 
+# or queue instead of publishing immediately: slots respect posting windows,
+# per-account spacing, and daily caps ([schedule] section in config TOML)
+clipengine queue add youtube clip.mp4 --account mychannel --title "Insane clutch"
+clipengine queue list
+clipengine queue run          # publishes everything due - run from cron every ~15min
+
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
 ```
@@ -81,6 +87,7 @@ clipengine/
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
   package/        ASS caption generation + music-DMCA screening/muting
   publish/        YouTube resumable upload + TikTok direct post + OAuth tokens
+                  + scheduling queue (posting windows, spacing, daily caps)
 ```
 
 ## Pipeline overview
