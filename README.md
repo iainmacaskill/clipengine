@@ -12,6 +12,8 @@ creator-reward programmes on an own-brand, permissioned clip network.
   rights strategy, pipeline architecture, MVP scope, roadmap, unit economics, risks.
 - [`docs/spike-notes.md`](docs/spike-notes.md) — findings from the first technical
   spike (end-to-end pipeline trial using the public `clipify` Claude Code skill).
+- [`docs/first-live-run.md`](docs/first-live-run.md) — checklist for the first
+  end-to-end run on real VOD footage: credentials, commands, what to validate.
 - [`spike/`](spike/) — scripts from the spike run: mock-VOD generator, transcription
   wrappers (faster-whisper and PocketSphinx), and the trim/reformat/caption pipeline.
 
