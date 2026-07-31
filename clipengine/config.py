@@ -82,6 +82,12 @@ class ScheduleConfig:
 
 
 @dataclass
+class LLMConfig:
+    model: str = "claude-opus-5"
+    burn_hook: bool = True  # burn the generated hook over the clip's first 2.5s
+
+
+@dataclass
 class AnalyticsConfig:
     stats_db: str = os.path.expanduser("~/.clipengine/stats.db")
 
@@ -96,6 +102,7 @@ class Config:
     tiktok: TikTokConfig = field(default_factory=TikTokConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
     review_db: str = os.path.expanduser("~/.clipengine/review.db")

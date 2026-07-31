@@ -61,8 +61,14 @@ def render_candidate(
     cfg: Config,
     with_captions: bool = True,
     credit_text: str | None = None,
+    transcript_out: str | None = None,
 ) -> str:
-    """Cut one candidate, reformat to 9:16, caption, and write the final master."""
+    """Cut one candidate, reformat to 9:16, caption, and write the final master.
+
+    When captions are generated, the clip-relative transcript is also saved to
+    ``transcript_out`` (JSON) if given - downstream stages (hook/title
+    generation) reuse it instead of re-transcribing.
+    """
     work = cfg.work_dir
     os.makedirs(work, exist_ok=True)
     source = edit.probe(video_path)
@@ -81,6 +87,8 @@ def render_candidate(
 
     clip_wav = audio.extract_wav(vert, os.path.join(work, "clip.wav"))
     transcript = transcribe.transcribe(clip_wav)
+    if transcript_out:
+        transcribe.save(transcript, transcript_out)
     ass = captions.write_ass(transcript, os.path.join(work, "captions.ass"), cfg.caption)
     return edit.burn_subtitles(vert, out_path, ass, cfg.edit)
 
@@ -94,16 +102,26 @@ def process_vod(
     top_n: int | None = None,
     with_captions: bool = True,
     facecam: FacecamRegion | None = None,
+    suggest=None,
 ) -> list[dict]:
-    """Whole-VOD batch: detect -> render top-N (credited) -> music screen/mute.
+    """Whole-VOD batch: detect -> render top-N (credited) -> music screen/mute
+    -> LLM hook/title/hashtags (when configured).
 
     Writes clips and a manifest.json into ``out_dir`` and returns the manifest.
     The permission roster is checked first (raises PermissionError_ if the
     streamer is not allowed); each clip is screened for music and auto-muted
     when flagged; one clip's failure is recorded and does not stop the batch.
+
+    ``suggest`` is a callable(transcript_text, streamer) -> hooks.Suggestion|None;
+    when None it defaults to Claude via package.hooks if an API key is present.
+    Suggestions need a transcript, so they only run when captions are on.
     """
+    from .package import hooks
     from .package.music import check as music_check, mute_segments
     from .roster import Roster
+
+    if suggest is None and hooks.available():
+        suggest = lambda text, s: hooks.generate(text, s)  # noqa: E731
 
     with Roster(cfg.roster_db) as roster:
         entry = roster.require(streamer)
@@ -134,11 +152,25 @@ def process_vod(
             "credit": credit,
         }
         out_path = os.path.join(out_dir, f"clip_{i:02d}_{int(cand.start)}s.mp4")
+        transcript_path = out_path.replace(".mp4", ".transcript.json")
         try:
             render_candidate(
                 video_path, cand, facecam, out_path, cfg,
                 with_captions=with_captions, credit_text=credit,
+                transcript_out=transcript_path,
             )
+            if suggest and os.path.exists(transcript_path):
+                transcript = transcribe.load(transcript_path)
+                text = " ".join(s.text.strip() for s in transcript.segments)
+                suggestion = suggest(text, streamer)
+                if suggestion:
+                    item["hook"] = suggestion.hook
+                    item["suggested_title"] = suggestion.title
+                    item["hashtags"] = suggestion.hashtags
+                    if cfg.llm.burn_hook and suggestion.hook:
+                        hooked = out_path.replace(".mp4", "_hooked.mp4")
+                        edit.burn_hook(out_path, hooked, suggestion.hook, cfg.edit)
+                        os.replace(hooked, out_path)
             wav = audio.extract_wav(out_path, os.path.join(cfg.work_dir, "screen.wav"))
             segments = music_check(wav)
             if segments:

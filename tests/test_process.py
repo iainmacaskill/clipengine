@@ -33,9 +33,11 @@ def _candidates():
 def patched(monkeypatch, tmp_path, cfg):
     """Stub the heavy stages; record calls."""
     calls = {"rendered": [], "screened": []}
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(pipeline, "detect_candidates", lambda v, c, cf: _candidates())
 
-    def fake_render(video, cand, facecam, out_path, cf, with_captions=True, credit_text=None):
+    def fake_render(video, cand, facecam, out_path, cf, with_captions=True,
+                    credit_text=None, transcript_out=None):
         calls["rendered"].append((cand.start, credit_text, out_path))
         open(out_path, "w").write("clip")
         return out_path
@@ -82,7 +84,8 @@ def test_process_default_credit_from_login(cfg, tmp_path, patched):
 def test_process_isolates_per_clip_failure(cfg, tmp_path, patched, monkeypatch):
     _allow(cfg)
 
-    def flaky_render(video, cand, facecam, out_path, cf, with_captions=True, credit_text=None):
+    def flaky_render(video, cand, facecam, out_path, cf, with_captions=True,
+                     credit_text=None, transcript_out=None):
         if cand.start == 300.0:
             raise RuntimeError("ffmpeg exploded")
         open(out_path, "w").write("clip")

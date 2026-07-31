@@ -73,6 +73,10 @@ clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tune
 clipengine render vod.mp4 --start 3721 --end 3796 --streamer somestreamer -o clip.mp4
 clipengine facecam vod.mp4        # inspect the detection on its own
 
+# LLM hook/title/hashtags for a clip (needs ANTHROPIC_API_KEY + clipengine[llm]);
+# process runs this automatically per clip and burns the hook over the first 2.5s
+clipengine suggest clip.mp4 --streamer somestreamer
+
 # DMCA screen: flag music-likely segments; optionally write a muted copy
 clipengine music-check clip.mp4 --mute clip_safe.mp4
 
@@ -112,7 +116,7 @@ clipengine/
   detect/         chat + audio signal extraction, fusion, optional ASR,
                   weight tuning against viewer-clipped ground truth
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
-  package/        ASS caption generation + music-DMCA screening/muting
+  package/        ASS captions + music-DMCA screening + LLM hooks/titles/hashtags
   publish/        YouTube resumable upload + TikTok direct post + OAuth tokens
                   + scheduling queue (posting windows, spacing, daily caps)
 ```

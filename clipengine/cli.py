@@ -128,6 +128,32 @@ def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_suggest(args: argparse.Namespace, cfg: config.Config) -> int:
+    import json
+    import os
+
+    from .detect import transcribe
+    from .detect.audio import extract_wav
+    from .package import hooks
+
+    if not hooks.available():
+        print("ANTHROPIC_API_KEY not set - hook generation unavailable", file=sys.stderr)
+        return 1
+    os.makedirs(cfg.work_dir, exist_ok=True)
+    wav = extract_wav(args.video, os.path.join(cfg.work_dir, "suggest.wav"))
+    transcript = transcribe.transcribe(wav)
+    text = " ".join(s.text.strip() for s in transcript.segments)
+    suggestion = hooks.generate(text, args.streamer, model=cfg.llm.model)
+    if suggestion is None:
+        print("no suggestion generated (empty transcript or declined)", file=sys.stderr)
+        return 1
+    print(json.dumps(
+        {"hook": suggestion.hook, "title": suggestion.title, "hashtags": suggestion.hashtags},
+        indent=1,
+    ))
+    return 0
+
+
 def _cmd_music_check(args: argparse.Namespace, cfg: config.Config) -> int:
     import os
 
@@ -396,7 +422,7 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
             return 1
         with Queue(cfg.schedule.queue_db) as queue:
             for m in rendered:
-                title = args.title_template.format(
+                title = m.get("suggested_title") or args.title_template.format(
                     streamer=m["streamer"], i=m["index"], start=int(m["start"])
                 )
                 post = queue.add(
@@ -671,6 +697,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--privacy", help="youtube: private|unlisted|public; tiktok: SELF_ONLY|...")
     p.add_argument("--skip-music-check", action="store_true")
     p.set_defaults(func=_cmd_publish)
+
+    p = sub.add_parser("suggest", help="LLM hook/title/hashtags for an existing clip")
+    p.add_argument("video")
+    p.add_argument("--streamer", required=True)
+    p.set_defaults(func=_cmd_suggest)
 
     p = sub.add_parser("music-check", help="screen a clip for music-likely segments (DMCA)")
     p.add_argument("video")

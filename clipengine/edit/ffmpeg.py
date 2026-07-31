@@ -108,6 +108,27 @@ def vertical(
     return dst
 
 
+def burn_hook(src: str, dst: str, hook_text: str, cfg: EditConfig) -> str:
+    """Burn a large text hook over the first 2.5 seconds of a vertical clip."""
+    y = cfg.facecam_tile_height + 70
+    vf = (
+        f"drawtext=text='{escape_drawtext(hook_text)}'"
+        f":font=Sans:fontsize=64:fontcolor=white"
+        f":borderw=5:bordercolor=black"
+        f":x=(w-tw)/2:y={y}:enable='lt(t,2.5)'"
+    )
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
+            "-c:a", "copy", dst,
+        ],
+        check=True,
+    )
+    return dst
+
+
 def burn_subtitles(src: str, dst: str, ass_path: str, cfg: EditConfig) -> str:
     subprocess.run(
         [
