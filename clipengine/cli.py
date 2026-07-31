@@ -354,6 +354,58 @@ def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
+    from . import pipeline
+    from .models import FacecamRegion
+
+    facecam = None
+    if args.facecam:
+        x, y, w, h = (int(v) for v in args.facecam.split(","))
+        facecam = FacecamRegion(x, y, w, h)
+
+    manifest = pipeline.process_vod(
+        args.video,
+        args.chat,
+        args.streamer,
+        args.output_dir,
+        cfg,
+        top_n=args.top,
+        with_captions=not args.no_captions,
+        facecam=facecam,
+    )
+    rendered = [m for m in manifest if m["status"] == "rendered"]
+    for m in manifest:
+        if m["status"] == "rendered":
+            mute_note = (
+                f"  (muted {len(m['muted_segments'])} music segment(s))"
+                if m.get("muted_segments")
+                else ""
+            )
+            print(f"#{m['index']} {m['start']:8.1f}-{m['end']:8.1f}s "
+                  f"score={m['score']:.2f}  {m['path']}{mute_note}")
+        else:
+            print(f"#{m['index']} {m['start']:8.1f}-{m['end']:8.1f}s FAILED: {m['error']}",
+                  file=sys.stderr)
+    print(f"\n{len(rendered)}/{len(manifest)} rendered -> {args.output_dir}/manifest.json")
+
+    if args.queue_platform and rendered:
+        from .publish.scheduler import Queue
+
+        if not args.account:
+            print("--account is required with --queue-platform", file=sys.stderr)
+            return 1
+        with Queue(cfg.schedule.queue_db) as queue:
+            for m in rendered:
+                title = args.title_template.format(
+                    streamer=m["streamer"], i=m["index"], start=int(m["start"])
+                )
+                post = queue.add(
+                    args.queue_platform, args.account, m["path"], title, _rules(cfg)
+                )
+                print(f"queued #{post.id} {post.scheduled_at}  {title}")
+    return 0
+
+
 def _cmd_truth(args: argparse.Namespace, cfg: config.Config) -> int:
     import json
 
@@ -574,6 +626,23 @@ def main(argv: list[str] | None = None) -> int:
     qr.add_argument("--dry-run", action="store_true")
     qr.set_defaults(func=_cmd_queue)
     p.set_defaults(func=_cmd_queue)
+
+    p = sub.add_parser(
+        "process", help="whole-VOD batch: detect -> render top-N credited clips -> music screen"
+    )
+    p.add_argument("video")
+    p.add_argument("--chat", help="chat log JSONL (strongly recommended)")
+    p.add_argument("--streamer", required=True, help="roster streamer; credit is burned in")
+    p.add_argument("-o", "--output-dir", required=True)
+    p.add_argument("--top", type=int, help="clips to render (default: detect.top_n)")
+    p.add_argument("--facecam", help="X,Y,W,H override (auto-detected if omitted)")
+    p.add_argument("--no-captions", action="store_true")
+    p.add_argument("--queue-platform", choices=["youtube", "tiktok"],
+                   help="also enqueue rendered clips for publishing")
+    p.add_argument("--account", help="publish account (required with --queue-platform)")
+    p.add_argument("--title-template", default="{streamer} clip {i}",
+                   help="queue titles; placeholders: {streamer} {i} {start}")
+    p.set_defaults(func=_cmd_process)
 
     p = sub.add_parser("truth", help="fetch viewer-clipped moments of a VOD (detector ground truth)")
     p.add_argument("vod_id")

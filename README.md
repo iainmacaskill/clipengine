@@ -48,6 +48,10 @@ clipengine chat 2274633451 --streamer somestreamer -o chat.jsonl
 # score a VOD (chat log optional but strongly recommended)
 clipengine detect vod.mp4 --chat chat.jsonl
 
+# or do detect -> render top-N (credited) -> music screen -> queue in ONE command
+clipengine process vod.mp4 --chat chat.jsonl --streamer somestreamer -o clips/ \
+    --top 5 --queue-platform youtube --account mychannel
+
 # tune detector weights against what viewers actually clipped
 clipengine truth <vod_id> --streamer somestreamer -o truth.json
 clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
