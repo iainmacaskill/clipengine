@@ -15,10 +15,10 @@ from .models import ClipCandidate, FacecamRegion, SignalSeries
 from .package import captions
 
 
-def detect_candidates(
+def compute_series(
     video_path: str, chat_path: str | None, cfg: Config
-) -> list[ClipCandidate]:
-    """Score the timeline and return ranked candidate windows."""
+) -> tuple[list[SignalSeries], dict[str, float], float]:
+    """Extract all detection signal series once -> (series, config weights, duration)."""
     os.makedirs(cfg.work_dir, exist_ok=True)
     source = edit.probe(video_path)
 
@@ -36,7 +36,15 @@ def detect_candidates(
         weights["chat_velocity"] = cfg.detect.weight_chat_velocity
         weights["chat_emotes"] = cfg.detect.weight_chat_emotes
 
-    return fusion.fuse(series, weights, source.duration, cfg.detect)
+    return series, weights, source.duration
+
+
+def detect_candidates(
+    video_path: str, chat_path: str | None, cfg: Config
+) -> list[ClipCandidate]:
+    """Score the timeline and return ranked candidate windows."""
+    series, weights, duration = compute_series(video_path, chat_path, cfg)
+    return fusion.fuse(series, weights, duration, cfg.detect)
 
 
 def render_candidate(

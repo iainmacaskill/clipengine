@@ -335,6 +335,48 @@ def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_truth(args: argparse.Namespace, cfg: config.Config) -> int:
+    import json
+
+    from .ingest.twitch import TwitchClient
+
+    client = TwitchClient(cfg.twitch)
+    clips = client.vod_clips(args.streamer, args.vod_id)
+    if not clips:
+        print("no viewer clips with vod offsets found for this VOD", file=sys.stderr)
+        return 1
+    with open(args.output, "w") as f:
+        json.dump(clips, f, indent=1)
+    print(f"{len(clips)} viewer-clipped moments -> {args.output}")
+    return 0
+
+
+def _cmd_tune(args: argparse.Namespace, cfg: config.Config) -> int:
+    import json
+
+    from . import pipeline
+    from .detect.tune import to_config_toml, tune
+
+    with open(args.truth) as f:
+        truth = json.load(f)
+    series, _, duration = pipeline.compute_series(args.video, args.chat, cfg)
+    results = tune(
+        series, duration, truth, cfg.detect, top_n=args.top_n, top_truth=args.top_truth
+    )
+    print(f"evaluated {len(results)} weight configs against {min(args.top_truth, len(truth))} "
+          f"truth moments (recall@{args.top_n or cfg.detect.top_n})\n")
+    for weights, ev in results[:10]:
+        w = "  ".join(f"{k.replace('weight_', '')}={v:g}" for k, v in sorted(weights.items()))
+        print(f"recall={ev.recall:.2f} hits={ev.hits}/{ev.n_truth} "
+              f"mean_rank={ev.mean_hit_rank:.1f}   {w}")
+    best_weights, best_eval = results[0]
+    if args.write_config:
+        with open(args.write_config, "w") as f:
+            f.write(to_config_toml(best_weights))
+        print(f"\nbest config -> {args.write_config}")
+    return 0
+
+
 def _cmd_stats(args: argparse.Namespace, cfg: config.Config) -> int:
     from . import analytics
     from .publish.scheduler import Queue
@@ -510,6 +552,21 @@ def main(argv: list[str] | None = None) -> int:
     qr.add_argument("--dry-run", action="store_true")
     qr.set_defaults(func=_cmd_queue)
     p.set_defaults(func=_cmd_queue)
+
+    p = sub.add_parser("truth", help="fetch viewer-clipped moments of a VOD (detector ground truth)")
+    p.add_argument("vod_id")
+    p.add_argument("--streamer", required=True)
+    p.add_argument("-o", "--output", required=True, help="truth JSON path")
+    p.set_defaults(func=_cmd_truth)
+
+    p = sub.add_parser("tune", help="grid-search detector weights against truth moments")
+    p.add_argument("video")
+    p.add_argument("--chat", help="chat log JSONL")
+    p.add_argument("--truth", required=True, help="truth JSON from 'clipengine truth'")
+    p.add_argument("--top-n", type=int, help="candidate windows considered (default: detect.top_n)")
+    p.add_argument("--top-truth", type=int, default=10, help="truth moments considered")
+    p.add_argument("--write-config", metavar="TOML", help="write the best weights as config")
+    p.set_defaults(func=_cmd_tune)
 
     p = sub.add_parser("stats", help="performance analytics for published posts")
     ssub = p.add_subparsers(dest="stats_action", required=True)

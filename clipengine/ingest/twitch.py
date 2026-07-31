@@ -60,6 +60,41 @@ class TwitchClient:
         resp.raise_for_status()
         return resp.json()["data"]
 
+    def vod_clips(
+        self, login: str, vod_id: str, max_pages: int = 10, first: int = 100
+    ) -> list[dict]:
+        """Viewer-created clips of one VOD, with their VOD offsets, views-descending.
+
+        This is detector ground truth: the moments the audience itself clipped.
+        Helix /clips only filters by broadcaster, so we page through recent clips
+        and keep the ones from this VOD that carry a vod_offset.
+        """
+        uid = self.user_id(login)
+        clips: list[dict] = []
+        cursor: str | None = None
+        for _ in range(max_pages):
+            params: dict = {"broadcaster_id": uid, "first": first}
+            if cursor:
+                params["after"] = cursor
+            resp = httpx.get(_HELIX + "/clips", params=params, headers=self._auth_headers())
+            resp.raise_for_status()
+            data = resp.json()
+            for c in data.get("data", []):
+                if c.get("video_id") == vod_id and c.get("vod_offset") is not None:
+                    clips.append(
+                        {
+                            "offset": float(c["vod_offset"]),
+                            "duration": float(c.get("duration", 30.0)),
+                            "views": int(c.get("view_count", 0)),
+                            "title": c.get("title", ""),
+                        }
+                    )
+            cursor = (data.get("pagination") or {}).get("cursor")
+            if not cursor:
+                break
+        clips.sort(key=lambda c: -c["views"])
+        return clips
+
     def download_vod(self, vod_id: str, dst_path: str) -> str:
         """Download a VOD's video via yt-dlp (see ingest.vod for routes/auth notes)."""
         from .vod import download_vod

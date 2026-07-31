@@ -78,10 +78,18 @@ clipengine publish tiktok clip1.mp4 --title "<hook>"   # SELF_ONLY until audit
 
 ## 5. What to actually validate (the point of the run)
 
-- [ ] **Detection vs. ground truth** — the core bet. Compare the top 8 windows in
-  `candidates.json` against (a) the VOD's most-clipped moments on Twitch's clips
-  page and (b) what the streamer/editors chose to post. Target from the plan:
-  detector top-10 should cover the majority of them. Record hits/misses.
+- [ ] **Detection vs. ground truth** — the core bet, now automated:
+
+  ```bash
+  clipengine truth <vod_id> --streamer <streamer> -o truth.json   # viewer-clipped moments
+  clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
+  ```
+
+  The report shows recall@N per weight config — the default-weights row is the
+  validation number (plan target: top-10 windows cover the majority of the top
+  viewer-clipped moments), and the best row is the tuned config to adopt.
+  A VOD with 10+ viewer clips gives meaningful discrimination; fewer and most
+  configs tie at the same recall.
 - [ ] **Facecam box** — is the score >0.4 and the box right? Screenshot one frame
   with the box burned in if unsure. Streams that switch scenes mid-VOD will
   confuse it (known limitation).
