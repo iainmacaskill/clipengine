@@ -20,12 +20,13 @@ creator-reward programmes on an own-brand, permissioned clip network.
 Pre-MVP. Product plan drafted; pipeline scaffolded as a Python package with working
 detection (chat velocity + emote spikes + audio energy, fused into ranked windows),
 edit (frame-accurate trim, 9:16 facecam-top layout), and captioning (opus-style ASS)
-stages, plus a complete ingest pair: chat replay downloader (GQL persisted-query
-route) and VOD video downloader (yt-dlp wrapper with quality cap and time-slice
-support) — both tested against mocks, pending a first live run. TikTok/YouTube
-publishing remains stubbed pending API credentials/audit. Next: run detection on real
-VOD footage from a clip-permissive streamer and compare picks against the streamer's
-own posted clips.
+stages, permission-gated ingest (chat replay + VOD downloaders), music-DMCA
+screening, and publishing clients for YouTube (Data API v3 resumable upload) and
+TikTok (Content Posting API direct-post flow) with OAuth token management and a
+music-check gate before every publish. All network integrations are tested against
+mocked transports; live runs need real credentials (Google Cloud OAuth client;
+TikTok developer app — unaudited apps can only post SELF_ONLY, submit the audit
+early). Next: first live run on real VOD footage from a clip-permissive streamer.
 
 ## Quick start
 
@@ -53,6 +54,11 @@ clipengine facecam vod.mp4        # inspect the detection on its own
 # DMCA screen: flag music-likely segments; optionally write a muted copy
 clipengine music-check clip.mp4 --mute clip_safe.mp4
 
+# one-time per-account authorisation, then publish (music gate runs first)
+clipengine auth youtube                 # prints consent URL; re-run with --code
+clipengine publish youtube clip.mp4 --title "Insane clutch" --privacy unlisted
+clipengine publish tiktok clip.mp4 --title "insane clutch #gaming"
+
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
 ```
@@ -72,7 +78,7 @@ clipengine/
   detect/         chat + audio signal extraction, fusion, optional ASR
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
   package/        ASS caption generation + music-DMCA screening/muting
-  publish/        YouTube + TikTok stubs (Phase 2)
+  publish/        YouTube resumable upload + TikTok direct post + OAuth tokens
 ```
 
 ## Pipeline overview

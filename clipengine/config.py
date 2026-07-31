@@ -55,11 +55,30 @@ class TwitchConfig:
 
 
 @dataclass
+class YouTubeConfig:
+    client_id: str = ""
+    client_secret: str = ""
+    token_file: str = os.path.expanduser("~/.clipengine/youtube_tokens.json")
+    redirect_uri: str = "http://localhost:8080"
+
+
+@dataclass
+class TikTokConfig:
+    client_key: str = ""
+    client_secret: str = ""
+    token_file: str = os.path.expanduser("~/.clipengine/tiktok_tokens.json")
+    redirect_uri: str = "http://localhost:8080"
+    privacy_level: str = "SELF_ONLY"  # only option until the app passes audit
+
+
+@dataclass
 class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     edit: EditConfig = field(default_factory=EditConfig)
     caption: CaptionConfig = field(default_factory=CaptionConfig)
     twitch: TwitchConfig = field(default_factory=TwitchConfig)
+    youtube: YouTubeConfig = field(default_factory=YouTubeConfig)
+    tiktok: TikTokConfig = field(default_factory=TikTokConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
 
@@ -79,8 +98,11 @@ def load(path: str | None = None) -> Config:
             elif values is not None and not hasattr(section, "__dataclass_fields__"):
                 setattr(cfg, section_field.name, values)
     # env overrides for secrets
-    cfg.twitch.client_id = os.environ.get("CLIPENGINE_TWITCH_CLIENT_ID", cfg.twitch.client_id)
-    cfg.twitch.client_secret = os.environ.get(
-        "CLIPENGINE_TWITCH_CLIENT_SECRET", cfg.twitch.client_secret
-    )
+    env = os.environ.get
+    cfg.twitch.client_id = env("CLIPENGINE_TWITCH_CLIENT_ID", cfg.twitch.client_id)
+    cfg.twitch.client_secret = env("CLIPENGINE_TWITCH_CLIENT_SECRET", cfg.twitch.client_secret)
+    cfg.youtube.client_id = env("CLIPENGINE_YT_CLIENT_ID", cfg.youtube.client_id)
+    cfg.youtube.client_secret = env("CLIPENGINE_YT_CLIENT_SECRET", cfg.youtube.client_secret)
+    cfg.tiktok.client_key = env("CLIPENGINE_TT_CLIENT_KEY", cfg.tiktok.client_key)
+    cfg.tiktok.client_secret = env("CLIPENGINE_TT_CLIENT_SECRET", cfg.tiktok.client_secret)
     return cfg

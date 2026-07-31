@@ -129,6 +129,112 @@ def _cmd_music_check(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _screen_for_music(video: str, cfg: config.Config) -> bool:
+    """DMCA gate before publishing. Returns True if the clip is clean."""
+    import os
+
+    from .detect.audio import extract_wav
+    from .package.music import check
+
+    os.makedirs(cfg.work_dir, exist_ok=True)
+    wav = extract_wav(video, os.path.join(cfg.work_dir, "publish_check.wav"))
+    segments = check(wav)
+    for s in segments:
+        print(
+            f"music-likely: {s.start:.1f}-{s.end:.1f}s score={s.score:.2f}", file=sys.stderr
+        )
+    return not segments
+
+
+def _warn_short_for_rewards(video: str) -> None:
+    from .edit.ffmpeg import probe
+
+    duration = probe(video).duration
+    if duration < 61.0:
+        print(
+            f"warning: clip is {duration:.0f}s - TikTok Creator Rewards pays only on "
+            "videos over 1 minute",
+            file=sys.stderr,
+        )
+
+
+def _cmd_auth(args: argparse.Namespace, cfg: config.Config) -> int:
+    if args.platform == "youtube":
+        from .publish.youtube import YouTubeClient, build_auth_url
+
+        if not args.code:
+            print(build_auth_url(cfg.youtube.client_id, cfg.youtube.redirect_uri))
+            print(
+                "\nOpen the URL, approve, then re-run with --code <code from redirect>",
+                file=sys.stderr,
+            )
+            return 0
+        client = YouTubeClient(
+            cfg.youtube.client_id, cfg.youtube.client_secret, cfg.youtube.token_file
+        )
+        client.exchange_code(args.code, cfg.youtube.redirect_uri)
+        print(f"tokens saved -> {cfg.youtube.token_file}")
+    else:
+        from .publish.tiktok import TikTokClient, build_auth_url
+
+        if not args.code:
+            print(build_auth_url(cfg.tiktok.client_key, cfg.tiktok.redirect_uri))
+            print(
+                "\nOpen the URL, approve, then re-run with --code <code from redirect>",
+                file=sys.stderr,
+            )
+            return 0
+        client = TikTokClient(
+            cfg.tiktok.client_key, cfg.tiktok.client_secret, cfg.tiktok.token_file
+        )
+        client.exchange_code(args.code, cfg.tiktok.redirect_uri)
+        print(f"tokens saved -> {cfg.tiktok.token_file}")
+    return 0
+
+
+def _cmd_publish(args: argparse.Namespace, cfg: config.Config) -> int:
+    if not args.skip_music_check and not _screen_for_music(args.video, cfg):
+        print(
+            "publish refused: music-likely segments found. Mute them first "
+            "(clipengine music-check --mute) or pass --skip-music-check to override.",
+            file=sys.stderr,
+        )
+        return 3
+    if args.platform == "youtube":
+        from .publish.youtube import UploadRequest, YouTubeClient
+
+        client = YouTubeClient(
+            cfg.youtube.client_id, cfg.youtube.client_secret, cfg.youtube.token_file
+        )
+        title = args.title if "#shorts" in args.title.lower() else args.title + " #Shorts"
+        video_id = client.upload(
+            UploadRequest(
+                video_path=args.video,
+                title=title,
+                description=args.description or "",
+                tags=args.tags.split(",") if args.tags else [],
+                privacy=args.privacy or "private",
+            )
+        )
+        print(f"https://www.youtube.com/shorts/{video_id}")
+    else:
+        from .publish.tiktok import PostRequest, TikTokClient
+
+        _warn_short_for_rewards(args.video)
+        client = TikTokClient(
+            cfg.tiktok.client_key, cfg.tiktok.client_secret, cfg.tiktok.token_file
+        )
+        publish_id = client.post(
+            PostRequest(
+                video_path=args.video,
+                caption=args.title,
+                privacy_level=args.privacy or cfg.tiktok.privacy_level,
+            )
+        )
+        print(f"published: {publish_id}")
+    return 0
+
+
 def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
     from .roster import PermissionError_, Roster
 
@@ -211,6 +317,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--streamer", required=True, help="streamer login (checked against roster)")
     p.add_argument("-o", "--output", required=True)
     p.set_defaults(func=_cmd_chat)
+
+    p = sub.add_parser("auth", help="authorise a publishing account (one-time per account)")
+    p.add_argument("platform", choices=["youtube", "tiktok"])
+    p.add_argument("--code", help="authorisation code from the consent redirect")
+    p.set_defaults(func=_cmd_auth)
+
+    p = sub.add_parser("publish", help="publish a clip (runs the music-DMCA gate first)")
+    p.add_argument("platform", choices=["youtube", "tiktok"])
+    p.add_argument("video")
+    p.add_argument("--title", required=True, help="video title / TikTok caption")
+    p.add_argument("--description", help="YouTube description")
+    p.add_argument("--tags", help="comma-separated tags (YouTube)")
+    p.add_argument("--privacy", help="youtube: private|unlisted|public; tiktok: SELF_ONLY|...")
+    p.add_argument("--skip-music-check", action="store_true")
+    p.set_defaults(func=_cmd_publish)
 
     p = sub.add_parser("music-check", help="screen a clip for music-likely segments (DMCA)")
     p.add_argument("video")
