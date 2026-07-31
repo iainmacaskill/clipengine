@@ -138,6 +138,57 @@ class Roster:
         rows = self._conn.execute(query + " ORDER BY login", params).fetchall()
         return [RosterEntry(**dict(r)) for r in rows]
 
+    def import_csv(
+        self, path: str, default_source: str = "published_policy"
+    ) -> tuple[list[RosterEntry], list[str]]:
+        """Bulk-add streamers from CSV -> (imported entries, per-row errors).
+
+        Columns: ``login`` and ``evidence`` required; ``source`` (defaults to
+        ``default_source``), ``credit``, ``exclusions``, ``notes`` optional; extra
+        columns ignored. A bad row is reported and skipped, the rest import.
+        """
+        import csv as _csv
+
+        imported: list[RosterEntry] = []
+        errors: list[str] = []
+        with open(path, newline="") as f:
+            reader = _csv.DictReader(f)
+            if reader.fieldnames is None or "login" not in reader.fieldnames:
+                raise ValueError("CSV needs a header row with at least: login,evidence")
+            for lineno, row in enumerate(reader, start=2):
+                try:
+                    imported.append(
+                        self.add(
+                            row.get("login", ""),
+                            source=(row.get("source") or default_source).strip(),
+                            evidence=row.get("evidence", ""),
+                            credit=(row.get("credit") or "").strip(),
+                            exclusions=(row.get("exclusions") or "").strip(),
+                            notes=(row.get("notes") or "").strip(),
+                        )
+                    )
+                except (ValueError, KeyError) as e:
+                    errors.append(f"row {lineno} ({row.get('login', '?')}): {e}")
+        return imported, errors
+
+    def export_csv(self, path: str) -> int:
+        """Write the whole roster (all statuses) to CSV; returns the row count."""
+        import csv as _csv
+
+        entries = self.list()
+        with open(path, "w", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow(
+                ["login", "status", "source", "evidence", "credit",
+                 "exclusions", "notes", "granted_at", "revoked_at"]
+            )
+            for e in entries:
+                writer.writerow(
+                    [e.login, e.status, e.source, e.evidence, e.credit,
+                     e.exclusions, e.notes, e.granted_at, e.revoked_at or ""]
+                )
+        return len(entries)
+
     def require(self, login: str) -> RosterEntry:
         """Gate call for ingestion: return the allowed entry or raise."""
         entry = self.get(login)

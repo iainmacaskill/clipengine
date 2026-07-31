@@ -41,6 +41,10 @@ clipengine roster add somestreamer --source published_policy \
     --evidence "https://somestreamer.tv/clip-policy" --credit "@somestreamer in caption"
 clipengine roster list
 
+# or bulk-import the roster from CSV (template: docs/roster-template.csv)
+clipengine roster import streamers.csv
+clipengine roster export -o roster_backup.csv
+
 # download a VOD's video (or just a slice of it) and its chat replay
 clipengine vod 2274633451 --streamer somestreamer -o vod.mp4 --start 3600 --end 5400
 clipengine chat 2274633451 --streamer somestreamer -o chat.jsonl

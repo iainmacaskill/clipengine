@@ -571,6 +571,20 @@ def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
                 notes=args.notes or "",
             )
             print(f"allowed: {entry.login} ({entry.source}, granted {entry.granted_at})")
+        elif args.roster_action == "import":
+            imported, errors = roster.import_csv(args.csv, default_source=args.source)
+            for line in errors:
+                print(f"skipped {line}", file=sys.stderr)
+            allowed_total = len(roster.list(status="allowed"))
+            print(
+                f"{len(imported)} imported, {len(errors)} skipped - "
+                f"roster now has {allowed_total} allowed streamer(s)"
+            )
+            if errors:
+                return 1
+        elif args.roster_action == "export":
+            count = roster.export_csv(args.output)
+            print(f"{count} entries -> {args.output}")
         elif args.roster_action == "revoke":
             entry = roster.revoke(args.streamer, reason=args.reason or "")
             print(f"revoked: {entry.login} at {entry.revoked_at}")
@@ -759,6 +773,13 @@ def main(argv: list[str] | None = None) -> int:
     ra.add_argument("--credit", help="required credit format, e.g. '@name in caption'")
     ra.add_argument("--exclusions", help="content the streamer excluded, e.g. sponsor segments")
     ra.add_argument("--notes")
+    ri = rsub.add_parser("import", help="bulk-add streamers from CSV (login,evidence[,source,credit,exclusions,notes])")
+    ri.add_argument("csv")
+    ri.add_argument("--source", default="published_policy",
+                    choices=["published_policy", "opt_in", "licence"],
+                    help="default for rows without a source column")
+    re_ = rsub.add_parser("export", help="write the whole roster to CSV")
+    re_.add_argument("-o", "--output", required=True)
     rr = rsub.add_parser("revoke", help="revoke a streamer's permission (immediate)")
     rr.add_argument("streamer")
     rr.add_argument("--reason")
