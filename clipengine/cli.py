@@ -406,6 +406,65 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .review import ReviewQueue
+
+    with ReviewQueue(cfg.review_db) as rq:
+        if args.review_action == "import":
+            added, skipped = rq.import_manifest(args.manifest)
+            print(f"{added} clips pending review ({skipped} skipped)")
+        elif args.review_action == "list":
+            clips = rq.list(status=args.status)
+            if not clips:
+                print("nothing to review" if args.status in (None, "pending") else "no clips")
+            for c in clips:
+                mark = {"pending": "?", "approved": "+", "rejected": "-"}[c.status]
+                extra = c.title or c.reason or ""
+                print(
+                    f"{mark} #{c.id:<4} {c.streamer:<18} {c.start:7.1f}-{c.end:7.1f}s "
+                    f"score={c.score:5.2f}  {c.status:<9} {extra[:40]}  {c.clip_path}"
+                )
+        elif args.review_action == "approve":
+            queued_post_id = None
+            if args.queue_platform:
+                if not args.account:
+                    print("--account is required with --queue-platform", file=sys.stderr)
+                    return 1
+                from .publish.scheduler import Queue
+
+                clip = rq.get(args.id)
+                if clip is None:
+                    print(f"no clip {args.id}", file=sys.stderr)
+                    return 1
+                with Queue(cfg.schedule.queue_db) as queue:
+                    post = queue.add(
+                        args.queue_platform, args.account, clip.clip_path,
+                        args.title, _rules(cfg), privacy=args.privacy or "",
+                    )
+                queued_post_id = post.id
+            clip = rq.approve(args.id, args.title, queued_post_id=queued_post_id)
+            queued = f", queued as post #{queued_post_id}" if queued_post_id else ""
+            print(f"#{clip.id} approved: {clip.title}{queued}")
+        elif args.review_action == "reject":
+            clip = rq.reject(args.id, args.reason)
+            print(f"#{clip.id} rejected: {clip.reason}")
+        else:  # stats
+            s = rq.stats()
+            rate = f"{s['pass_rate']:.0%}" if s["pass_rate"] is not None else "n/a"
+            target = ""
+            if s["pass_rate"] is not None:
+                target = "  (MVP target >=50%: " + (
+                    "MET" if s["pass_rate"] >= 0.5 else "NOT met"
+                ) + ")"
+            print(
+                f"pending={s['pending']} approved={s['approved']} "
+                f"rejected={s['rejected']}  pass rate: {rate}{target}"
+            )
+            for reason, count in s["rejection_reasons"].items():
+                print(f"  rejection x{count}: {reason}")
+    return 0
+
+
 def _cmd_truth(args: argparse.Namespace, cfg: config.Config) -> int:
     import json
 
@@ -643,6 +702,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--title-template", default="{streamer} clip {i}",
                    help="queue titles; placeholders: {streamer} {i} {start}")
     p.set_defaults(func=_cmd_process)
+
+    p = sub.add_parser("review", help="human review queue for rendered clips")
+    vsub = p.add_subparsers(dest="review_action", required=True)
+    vi = vsub.add_parser("import", help="add a process manifest's rendered clips as pending")
+    vi.add_argument("manifest")
+    vi.set_defaults(func=_cmd_review)
+    vl = vsub.add_parser("list")
+    vl.add_argument("--status", choices=["pending", "approved", "rejected"])
+    vl.set_defaults(func=_cmd_review)
+    va = vsub.add_parser("approve")
+    va.add_argument("id", type=int)
+    va.add_argument("--title", required=True, help="the real publish title")
+    va.add_argument("--queue-platform", choices=["youtube", "tiktok"],
+                    help="also enqueue for publishing")
+    va.add_argument("--account")
+    va.add_argument("--privacy")
+    va.set_defaults(func=_cmd_review)
+    vr = vsub.add_parser("reject")
+    vr.add_argument("id", type=int)
+    vr.add_argument("--reason", required=True,
+                    help="why (feeds tuning), e.g. 'not funny', 'cut too early'")
+    vr.set_defaults(func=_cmd_review)
+    vs = vsub.add_parser("stats", help="pass rate vs the MVP >=50% criterion")
+    vs.set_defaults(func=_cmd_review)
 
     p = sub.add_parser("truth", help="fetch viewer-clipped moments of a VOD (detector ground truth)")
     p.add_argument("vod_id")

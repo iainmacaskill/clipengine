@@ -52,6 +52,13 @@ clipengine detect vod.mp4 --chat chat.jsonl
 clipengine process vod.mp4 --chat chat.jsonl --streamer somestreamer -o clips/ \
     --top 5 --queue-platform youtube --account mychannel
 
+# human review: import the batch, approve (with real titles) into the publish
+# queue or reject with a reason; stats tracks the MVP >=50% pass-rate criterion
+clipengine review import clips/manifest.json
+clipengine review approve 1 --title "INSANE 1v5 clutch" --queue-platform youtube --account mychannel
+clipengine review reject 2 --reason "cut too early"
+clipengine review stats
+
 # tune detector weights against what viewers actually clipped
 clipengine truth <vod_id> --streamer somestreamer -o truth.json
 clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
@@ -93,6 +100,7 @@ clipengine/
   models.py       shared dataclasses (candidates, transcript, signals, ...)
   roster.py       streamer permission roster (SQLite) - gates all ingestion
   analytics.py    performance snapshots + reporting for published posts
+  review.py       human review queue - pass-rate metric, approvals feed publishing
   config.py       tunable pipeline config (TOML + env overrides)
   pipeline.py     batch orchestration: detect_candidates / render_candidate
   cli.py          command-line entry point

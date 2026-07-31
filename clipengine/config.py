@@ -98,6 +98,7 @@ class Config:
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
     work_dir: str = "/tmp/clipengine"
     roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
+    review_db: str = os.path.expanduser("~/.clipengine/review.db")
 
 
 def load(path: str | None = None) -> Config:
