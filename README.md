@@ -40,8 +40,10 @@ clipengine chat 2274633451 -o chat.jsonl
 # score a VOD (chat log optional but strongly recommended)
 clipengine detect vod.mp4 --chat chat.jsonl
 
-# render one window as a captioned 9:16 short (facecam ROI in source pixels)
-clipengine render vod.mp4 --start 3721 --end 3796 --facecam 24,24,420,236 -o clip.mp4
+# render one window as a captioned 9:16 short (facecam auto-detected;
+# pass --facecam X,Y,W,H to override)
+clipengine render vod.mp4 --start 3721 --end 3796 -o clip.mp4
+clipengine facecam vod.mp4        # inspect the detection on its own
 
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
@@ -59,7 +61,7 @@ clipengine/
   cli.py          command-line entry point
   ingest/         Twitch Helix client (VOD listing works; downloads TODO)
   detect/         chat + audio signal extraction, fusion, optional ASR
-  edit/           ffmpeg trim / vertical reformat / subtitle burn
+  edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
   package/        ASS caption generation
   publish/        YouTube + TikTok stubs (Phase 2)
 ```

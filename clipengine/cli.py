@@ -31,17 +31,47 @@ def _cmd_detect(args: argparse.Namespace, cfg: config.Config) -> int:
 
 
 def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
-    x, y, w, h = (int(v) for v in args.facecam.split(","))
+    if args.facecam:
+        x, y, w, h = (int(v) for v in args.facecam.split(","))
+        facecam = FacecamRegion(x, y, w, h)
+    else:
+        from .edit.facecam import detect_facecam
+
+        found = detect_facecam(args.video)
+        if found is None:
+            print(
+                "no facecam detected - pass --facecam X,Y,W,H explicitly",
+                file=sys.stderr,
+            )
+            return 1
+        facecam = found.region
+        print(
+            f"facecam auto-detected: {facecam.x},{facecam.y},{facecam.w},{facecam.h} "
+            f"(score {found.score:.2f})",
+            file=sys.stderr,
+        )
     candidate = ClipCandidate(start=args.start, end=args.end, score=0.0)
     out = pipeline.render_candidate(
         args.video,
         candidate,
-        FacecamRegion(x, y, w, h),
+        facecam,
         args.output,
         cfg,
         with_captions=not args.no_captions,
     )
     print(out)
+    return 0
+
+
+def _cmd_facecam(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .edit.facecam import detect_facecam
+
+    found = detect_facecam(args.video, n_frames=args.frames)
+    if found is None:
+        print("no facecam detected", file=sys.stderr)
+        return 1
+    r = found.region
+    print(f"{r.x},{r.y},{r.w},{r.h}  score={found.score:.2f}")
     return 0
 
 
@@ -91,10 +121,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("video")
     p.add_argument("--start", type=float, required=True)
     p.add_argument("--end", type=float, required=True)
-    p.add_argument("--facecam", required=True, help="facecam ROI in source px: X,Y,W,H")
+    p.add_argument("--facecam", help="facecam ROI in source px: X,Y,W,H (auto-detected if omitted)")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--no-captions", action="store_true")
     p.set_defaults(func=_cmd_render)
+
+    p = sub.add_parser("facecam", help="auto-detect the facecam region of a video")
+    p.add_argument("video")
+    p.add_argument("--frames", type=int, default=24, help="frames to sample")
+    p.set_defaults(func=_cmd_facecam)
 
     p = sub.add_parser("vod", help="download a VOD's video (optionally a time slice)")
     p.add_argument("vod_id", help="VOD id or twitch.tv/videos/... URL")
