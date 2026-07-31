@@ -33,9 +33,14 @@ own posted clips.
 pip install -e ".[dev]"        # + ".[asr]" for faster-whisper captions
 pytest
 
+# record a streamer's permission first - ingestion is refused without it
+clipengine roster add somestreamer --source published_policy \
+    --evidence "https://somestreamer.tv/clip-policy" --credit "@somestreamer in caption"
+clipengine roster list
+
 # download a VOD's video (or just a slice of it) and its chat replay
-clipengine vod 2274633451 -o vod.mp4 --start 3600 --end 5400
-clipengine chat 2274633451 -o chat.jsonl
+clipengine vod 2274633451 --streamer somestreamer -o vod.mp4 --start 3600 --end 5400
+clipengine chat 2274633451 --streamer somestreamer -o chat.jsonl
 
 # score a VOD (chat log optional but strongly recommended)
 clipengine detect vod.mp4 --chat chat.jsonl
@@ -56,6 +61,7 @@ Chat log format is JSONL: `{"offset": seconds_from_start, "user": "...", "text":
 ```
 clipengine/
   models.py       shared dataclasses (candidates, transcript, signals, ...)
+  roster.py       streamer permission roster (SQLite) - gates all ingestion
   config.py       tunable pipeline config (TOML + env overrides)
   pipeline.py     batch orchestration: detect_candidates / render_candidate
   cli.py          command-line entry point

@@ -75,9 +75,19 @@ def _cmd_facecam(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _require_permission(streamer: str, cfg: config.Config) -> None:
+    from .roster import Roster
+
+    with Roster(cfg.roster_db) as roster:
+        entry = roster.require(streamer)
+    if entry.exclusions:
+        print(f"note - exclusions for {streamer}: {entry.exclusions}", file=sys.stderr)
+
+
 def _cmd_vod(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.vod import download_vod
 
+    _require_permission(args.streamer, cfg)
     out = download_vod(
         args.vod_id,
         args.output,
@@ -93,8 +103,43 @@ def _cmd_vod(args: argparse.Namespace, cfg: config.Config) -> int:
 def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.chat_replay import download_chat
 
+    _require_permission(args.streamer, cfg)
     count = download_chat(args.vod_id, args.output)
     print(f"{count} messages -> {args.output}")
+    return 0
+
+
+def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .roster import PermissionError_, Roster
+
+    with Roster(cfg.roster_db) as roster:
+        if args.roster_action == "add":
+            entry = roster.add(
+                args.streamer,
+                source=args.source,
+                evidence=args.evidence,
+                credit=args.credit or "",
+                exclusions=args.exclusions or "",
+                notes=args.notes or "",
+            )
+            print(f"allowed: {entry.login} ({entry.source}, granted {entry.granted_at})")
+        elif args.roster_action == "revoke":
+            entry = roster.revoke(args.streamer, reason=args.reason or "")
+            print(f"revoked: {entry.login} at {entry.revoked_at}")
+        elif args.roster_action == "check":
+            try:
+                entry = roster.require(args.streamer)
+                print(f"allowed: {entry.login} ({entry.source}, evidence: {entry.evidence})")
+            except PermissionError_ as e:
+                print(str(e), file=sys.stderr)
+                return 1
+        else:  # list
+            entries = roster.list(status=args.status)
+            if not entries:
+                print("roster is empty")
+            for e in entries:
+                flag = "+" if e.allowed else "-"
+                print(f"{flag} {e.login:<24} {e.source:<17} {e.evidence}")
     return 0
 
 
@@ -133,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("vod", help="download a VOD's video (optionally a time slice)")
     p.add_argument("vod_id", help="VOD id or twitch.tv/videos/... URL")
+    p.add_argument("--streamer", required=True, help="streamer login (checked against roster)")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--max-height", type=int, default=1080)
     p.add_argument("--start", type=float, help="slice start (seconds)")
@@ -142,8 +188,27 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("chat", help="download a VOD's chat replay to JSONL")
     p.add_argument("vod_id")
+    p.add_argument("--streamer", required=True, help="streamer login (checked against roster)")
     p.add_argument("-o", "--output", required=True)
     p.set_defaults(func=_cmd_chat)
+
+    p = sub.add_parser("roster", help="manage the streamer permission roster")
+    rsub = p.add_subparsers(dest="roster_action", required=True)
+    ra = rsub.add_parser("add", help="record (or re-grant) a streamer's permission")
+    ra.add_argument("streamer")
+    ra.add_argument("--source", required=True, choices=["published_policy", "opt_in", "licence"])
+    ra.add_argument("--evidence", required=True, help="clip-policy URL or consent reference")
+    ra.add_argument("--credit", help="required credit format, e.g. '@name in caption'")
+    ra.add_argument("--exclusions", help="content the streamer excluded, e.g. sponsor segments")
+    ra.add_argument("--notes")
+    rr = rsub.add_parser("revoke", help="revoke a streamer's permission (immediate)")
+    rr.add_argument("streamer")
+    rr.add_argument("--reason")
+    rc = rsub.add_parser("check", help="check whether ingestion is allowed")
+    rc.add_argument("streamer")
+    rl = rsub.add_parser("list")
+    rl.add_argument("--status", choices=["allowed", "revoked"])
+    p.set_defaults(func=_cmd_roster)
 
     p = sub.add_parser("vods", help="list a streamer's recent VODs")
     p.add_argument("streamer")
@@ -152,7 +217,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     cfg = config.load(args.config)
-    return args.func(args, cfg)
+    from .roster import PermissionError_
+
+    try:
+        return args.func(args, cfg)
+    except PermissionError_ as e:
+        print(str(e), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -61,6 +61,7 @@ class Config:
     caption: CaptionConfig = field(default_factory=CaptionConfig)
     twitch: TwitchConfig = field(default_factory=TwitchConfig)
     work_dir: str = "/tmp/clipengine"
+    roster_db: str = os.path.expanduser("~/.clipengine/roster.db")
 
 
 def load(path: str | None = None) -> Config:
