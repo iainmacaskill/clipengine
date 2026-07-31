@@ -31,6 +31,24 @@ def _cmd_detect(args: argparse.Namespace, cfg: config.Config) -> int:
 
 
 def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .pipeline import credit_text_for
+
+    credit: str | None = None
+    if args.credit:
+        credit = args.credit
+    elif args.streamer:
+        from .roster import Roster
+
+        with Roster(cfg.roster_db) as roster:
+            entry = roster.require(args.streamer)
+        credit = credit_text_for(args.streamer, entry.credit)
+    elif not args.no_credit:
+        print(
+            "credit required: pass --streamer LOGIN (uses their roster credit format), "
+            "--credit TEXT, or --no-credit for private test renders",
+            file=sys.stderr,
+        )
+        return 1
     if args.facecam:
         x, y, w, h = (int(v) for v in args.facecam.split(","))
         facecam = FacecamRegion(x, y, w, h)
@@ -58,6 +76,7 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
         args.output,
         cfg,
         with_captions=not args.no_captions,
+        credit_text=credit,
     )
     print(out)
     return 0
@@ -485,6 +504,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", type=float, required=True)
     p.add_argument("--end", type=float, required=True)
     p.add_argument("--facecam", help="facecam ROI in source px: X,Y,W,H (auto-detected if omitted)")
+    p.add_argument("--streamer", help="burn this streamer's roster credit into the clip")
+    p.add_argument("--credit", help="explicit credit overlay text (overrides roster)")
+    p.add_argument("--no-credit", action="store_true", help="private test renders only")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--no-captions", action="store_true")
     p.set_defaults(func=_cmd_render)

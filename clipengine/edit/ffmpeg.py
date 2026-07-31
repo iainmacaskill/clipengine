@@ -47,14 +47,22 @@ def trim(src: str, dst: str, start: float, duration: float, cfg: EditConfig) -> 
     return dst
 
 
-def vertical(
-    src: str,
-    dst: str,
+def escape_drawtext(text: str) -> str:
+    """Escape a string for ffmpeg drawtext (backslash, quote, colon, percent)."""
+    out = text.replace("\\", "\\\\")
+    for ch in ("'", ":", "%"):
+        out = out.replace(ch, "\\" + ch)
+    return out
+
+
+def vertical_graph(
     source: SourceVideo,
     facecam: FacecamRegion,
     cfg: EditConfig,
+    credit_text: str | None = None,
 ) -> str:
-    """Reformat 16:9 -> 9:16: facecam scaled into the top tile, gameplay centre-crop below."""
+    """Build the 16:9 -> 9:16 filtergraph; optionally burn a credit line into the
+    seam just below the facecam tile (clear of the face and of bottom captions)."""
     cam_h = cfg.facecam_tile_height
     game_h = cfg.out_height - cam_h
     # gameplay crop with the bottom tile's aspect ratio, full source height
@@ -68,6 +76,26 @@ def vertical(
         f"scale={cfg.out_width}:{game_h}:flags=lanczos[game];"
         f"[cam][game]vstack[v]"
     )
+    if credit_text:
+        graph += (
+            f";[v]drawtext=text='{escape_drawtext(credit_text)}'"
+            f":font=Sans:fontsize={cfg.credit_font_size}"
+            f":fontcolor=white@0.9:borderw=3:bordercolor=black@0.9"
+            f":x=(w-tw)/2:y={cam_h + 14}[v]"
+        )
+    return graph
+
+
+def vertical(
+    src: str,
+    dst: str,
+    source: SourceVideo,
+    facecam: FacecamRegion,
+    cfg: EditConfig,
+    credit_text: str | None = None,
+) -> str:
+    """Reformat 16:9 -> 9:16: facecam scaled into the top tile, gameplay centre-crop below."""
+    graph = vertical_graph(source, facecam, cfg, credit_text=credit_text)
     subprocess.run(
         [
             "ffmpeg", "-y", "-loglevel", "error", "-i", src,

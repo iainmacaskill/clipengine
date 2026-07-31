@@ -53,8 +53,9 @@ clipengine truth <vod_id> --streamer somestreamer -o truth.json
 clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
 
 # render one window as a captioned 9:16 short (facecam auto-detected;
-# pass --facecam X,Y,W,H to override)
-clipengine render vod.mp4 --start 3721 --end 3796 -o clip.mp4
+# pass --facecam X,Y,W,H to override). --streamer burns their roster credit
+# into the clip; --no-credit is allowed only for private test renders
+clipengine render vod.mp4 --start 3721 --end 3796 --streamer somestreamer -o clip.mp4
 clipengine facecam vod.mp4        # inspect the detection on its own
 
 # DMCA screen: flag music-likely segments; optionally write a muted copy

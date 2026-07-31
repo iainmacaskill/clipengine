@@ -37,6 +37,7 @@ class EditConfig:
     facecam_tile_height: int = 608  # facecam-top / gameplay-bottom layout
     crf: int = 20
     preset: str = "fast"
+    credit_font_size: int = 34
 
 
 @dataclass

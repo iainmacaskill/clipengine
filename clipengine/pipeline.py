@@ -47,6 +47,11 @@ def detect_candidates(
     return fusion.fuse(series, weights, duration, cfg.detect)
 
 
+def credit_text_for(streamer: str, roster_credit: str = "") -> str:
+    """Overlay text for a streamer: their roster credit format, or the default."""
+    return roster_credit.strip() or f"clip: twitch.tv/{streamer.strip().lower()}"
+
+
 def render_candidate(
     video_path: str,
     candidate: ClipCandidate,
@@ -54,6 +59,7 @@ def render_candidate(
     out_path: str,
     cfg: Config,
     with_captions: bool = True,
+    credit_text: str | None = None,
 ) -> str:
     """Cut one candidate, reformat to 9:16, caption, and write the final master."""
     work = cfg.work_dir
@@ -63,7 +69,10 @@ def render_candidate(
     cut = edit.trim(
         video_path, os.path.join(work, "cut.mp4"), candidate.start, candidate.duration, cfg.edit
     )
-    vert = edit.vertical(cut, os.path.join(work, "vertical.mp4"), source, facecam, cfg.edit)
+    vert = edit.vertical(
+        cut, os.path.join(work, "vertical.mp4"), source, facecam, cfg.edit,
+        credit_text=credit_text,
+    )
 
     if not with_captions:
         os.replace(vert, out_path)
