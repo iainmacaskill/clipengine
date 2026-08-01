@@ -844,14 +844,18 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                 print(str(e), file=sys.stderr)
                 return 2
             fetched: list[Campaign] = []
-            for status in cfg.campaigns.statuses:
-                fetched.extend(
-                    client.campaigns(
-                        status=status,
-                        goal_types=tuple(cfg.campaigns.goal_types) or None,
-                        with_rules=not args.no_rules,
+            try:
+                for status in cfg.campaigns.statuses:
+                    fetched.extend(
+                        client.campaigns(
+                            status=status,
+                            goal_types=tuple(cfg.campaigns.goal_types) or None,
+                            with_rules=not args.no_rules,
+                        )
                     )
-                )
+            except WhopError as e:
+                print(str(e), file=sys.stderr)
+                return 2
             new = store.upsert(fetched)
             print(f"synced {len(fetched)} campaign(s), {len(new)} new")
             alertable = [

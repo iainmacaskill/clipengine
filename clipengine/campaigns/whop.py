@@ -15,6 +15,12 @@ generated from Whop's OpenAPI spec):
   envelope) and ``GET /ledger_accounts/{id}`` — the balance/withdrawal side,
   used by the submission tracker's reconciliation step.
 
+Production reality check (first real sync, 2026-08-01): the live API 404s
+``/workforce/bounties`` — that surface is in the SDK but not yet rolled out.
+The original ``GET /bounties`` surface is the fallback (different vocabulary,
+translated in ``_from_legacy``); the client tries workforce first so it
+upgrades automatically when Whop ships it.
+
 This client only ever issues GET requests — read-only campaign discovery is
 the hard boundary set in the dev brief (§4). The CPM-per-views Content
 Rewards campaigns are not in the public API at all; those enter the store
@@ -67,23 +73,47 @@ class WhopClient:
             raise WhopError(f"GET {path} failed: {resp.status_code} {resp.text[:200]}")
         return resp.json()
 
-    def list_bounties(
-        self, status: str = "open", page_size: int = 50, max_pages: int = 20
-    ) -> list[dict]:
-        """All bounties with the given status, raw, following cursor pagination."""
+    def _paged(self, path: str, params: dict, page_size: int, max_pages: int) -> list[dict]:
         items: list[dict] = []
         after: str | None = None
         for _ in range(max_pages):
-            params: dict = {"status": status, "first": page_size,
-                            "order": "created_at", "direction": "desc"}
+            page_params = dict(params, first=page_size)
             if after:
-                params["after"] = after
-            page = self._get("/workforce/bounties", params)
+                page_params["after"] = after
+            page = self._get(path, page_params)
             items.extend(page.get("data") or [])
             after = (page.get("page_info") or {}).get("end_cursor")
             if not after:
                 break
         return items
+
+    def list_bounties(
+        self, status: str = "open", page_size: int = 50, max_pages: int = 20
+    ) -> list[dict]:
+        """All bounties with the given status, raw, following cursor pagination.
+
+        Tries the richer ``/workforce/bounties`` surface first; production
+        404s it as of 2026-08 (staged rollout — first real sync confirmed),
+        so on 404 this falls back to the original ``/bounties`` surface and
+        translates its vocabulary to the workforce shape. Legacy items carry
+        no ``business_goal_type`` key (the read model doesn't expose it), no
+        per-submission reward, and their ``description`` inline.
+        """
+        try:
+            return self._paged(
+                "/workforce/bounties",
+                {"status": status, "order": "created_at", "direction": "desc"},
+                page_size, max_pages,
+            )
+        except WhopError as e:
+            if " 404 " not in str(e):
+                raise
+        legacy = self._paged(
+            "/bounties",
+            {"status": _LEGACY_STATUS.get(status, status)},
+            page_size, max_pages,
+        )
+        return [_from_legacy(raw) for raw in legacy]
 
     def bounty(self, bounty_id: str) -> dict:
         return self._get(f"/workforce/bounties/{bounty_id}")
@@ -134,17 +164,50 @@ class WhopClient:
         """
         campaigns = []
         for raw in self.list_bounties(status=status, max_pages=max_pages):
-            goal = raw.get("business_goal_type") or ""
-            if goal_types is not None and goal not in goal_types:
-                continue
-            rules = ""
-            if with_rules:
+            # legacy /bounties items don't expose a goal type at all - the
+            # filter would drop everything, so it only applies when the key
+            # exists (workforce surface); legacy items pass through for the
+            # operator/scoring to judge
+            if goal_types is not None and "business_goal_type" in raw:
+                if (raw.get("business_goal_type") or "") not in goal_types:
+                    continue
+            rules = raw.get("description") or ""
+            if with_rules and not rules:
                 try:
                     rules = self.bounty(raw["id"]).get("description") or ""
                 except (WhopError, httpx.HTTPError):
                     pass
             campaigns.append(_normalise(raw, rules))
         return campaigns
+
+
+# original /bounties surface <-> canonical status vocabulary
+_LEGACY_STATUS = {"open": "published", "closed": "archived"}
+_LEGACY_TO_CANON = {"published": "open", "archived": "closed"}
+
+
+def _from_legacy(raw: dict) -> dict:
+    """Translate an original-surface /bounties item to the workforce shape.
+
+    total_available is the remaining pool and total_paid what's gone out;
+    per-submission reward and goal type aren't in this read model (the create
+    params prove the server knows them - the serializer just omits them), so
+    reward stays 0 and the business_goal_type key is deliberately absent.
+    """
+    available = float(raw.get("total_available") or 0.0)
+    paid = float(raw.get("total_paid") or 0.0)
+    status = raw.get("status") or ""
+    return {
+        "id": raw.get("id") or "",
+        "title": raw.get("title") or "",
+        "status": _LEGACY_TO_CANON.get(status, status),
+        "currency": raw.get("currency") or "usd",
+        "budget_amount": available + paid,
+        "gross_paid_out_amount": paid,
+        "gross_reward_amount": 0.0,
+        "description": raw.get("description") or "",
+        "created_at": str(raw.get("created_at") or ""),
+    }
 
 
 def _normalise(raw: dict, rules_text: str = "") -> Campaign:

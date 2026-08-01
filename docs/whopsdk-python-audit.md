@@ -80,3 +80,26 @@ defensive-discovery fallback still applies to those campaigns only.
 4. **Auth note:** the API requires a Whop API key; `user_id`-scoped
    listing only works for the authenticated user, and `account_id`
    scoping requires read access to that account.
+
+## Addendum — first production sync (2026-08-01)
+
+The live API **404s `GET /api/v1/workforce/bounties`** ("Unrecognized request
+URL") with a valid key: the workforce surface exists in the SDK (0.0.41, the
+latest) but is not yet rolled out in production. The SDK's *top-level*
+`client.bounties` resource (`GET /bounties`, `GET /bounties/{id}`) is the
+original surface and the working fallback, with a different read model:
+
+- `status`: `published`/`archived`/`scheduled` (vs `open`/`closed`/...)
+- budget: `total_available` (remaining pool) + `total_paid` (paid out)
+- `description` (rules text) is inline in the *list* response — no detail
+  fetch needed
+- **not exposed**: `business_goal_type`, `gross_reward_amount`,
+  `spots_remaining`, funding account/poster — even though the create params
+  accept them, the read serializer omits them, so client-side goal-type
+  filtering is impossible on this surface and per-submission reward is
+  unknown (the scorer treats unknown rate as neutral 1.0)
+
+clipengine's client tries `/workforce/bounties` first and falls back to
+`/bounties` on 404, translating the vocabulary — so it upgrades itself the
+day Whop ships the workforce surface. Payouts/ledger endpoints have not yet
+been probed against production.

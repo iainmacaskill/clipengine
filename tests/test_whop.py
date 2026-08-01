@@ -127,6 +127,87 @@ def test_detail_failure_keeps_campaign_without_rules():
     assert c.id == "bnty_1" and c.rules_text == ""
 
 
+# -- legacy /bounties fallback (production 404s /workforce/bounties, 2026-08) --
+
+
+def _legacy_bounty(i, status="published", **over):
+    raw = {
+        "id": f"bnty_{i}", "bounty_type": "workforce",
+        "title": f"Legacy campaign {i}", "status": status, "currency": "usd",
+        "description": "Use #brand. At least 30 seconds.",
+        "total_available": 800.0, "total_paid": 200.0, "vote_threshold": 1,
+        "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z",
+    }
+    raw.update(over)
+    return raw
+
+
+def _fallback_handler(requests=None):
+    """404 the workforce surface like production; serve legacy /bounties."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if requests is not None:
+            requests.append(request)
+        if "/workforce/bounties" in request.url.path:
+            return httpx.Response(404, text=json.dumps({"error": {
+                "type": "not_found", "message": "Unrecognized request URL"}}))
+        assert request.url.path.endswith("/bounties")
+        return httpx.Response(200, json={"data": [
+            _legacy_bounty(1), _legacy_bounty(2, status="archived"),
+        ], "page_info": {}})
+
+    return handler
+
+
+def test_fallback_to_legacy_bounties_on_404():
+    requests = []
+    items = _client(_fallback_handler(requests)).list_bounties(status="open")
+    assert [i["id"] for i in items] == ["bnty_1", "bnty_2"]
+    # canonical status vocabulary translated to the legacy surface's
+    assert requests[1].url.params["status"] == "published"
+    assert all(r.method == "GET" for r in requests)
+
+
+def test_legacy_translation():
+    (raw, second) = _client(_fallback_handler()).list_bounties()
+    assert raw["status"] == "open" and second["status"] == "closed"
+    assert raw["budget_amount"] == 1000.0        # available + paid
+    assert raw["gross_paid_out_amount"] == 200.0
+    assert raw["gross_reward_amount"] == 0.0     # not exposed by this surface
+    assert "business_goal_type" not in raw       # key absent, not empty
+
+
+def test_legacy_campaigns_skip_goal_filter_and_use_inline_rules():
+    requests = []
+    campaigns = _client(_fallback_handler(requests)).campaigns(with_rules=True)
+    # goal filter must not drop legacy items (no goal key to filter on),
+    # and the inline description means no per-bounty detail fetches
+    assert [c.id for c in campaigns] == ["bnty_1", "bnty_2"]
+    assert campaigns[0].rules_text.startswith("Use #brand")
+    assert campaigns[0].budget_remaining == 800.0
+    assert len(requests) == 2  # workforce 404 + one legacy list, nothing else
+
+
+def test_non_404_errors_do_not_fall_back():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="bad key")
+
+    with pytest.raises(WhopError, match="401"):
+        _client(handler).list_bounties()
+
+
+def test_unknown_reward_scores_neutral_not_zero():
+    from clipengine.campaigns.models import Campaign
+    from clipengine.campaigns.score import score_campaign
+
+    legacy = Campaign(id="bnty_1", source="whop_bounty", title="Legacy",
+                      status="open", reward_amount=0.0, budget_total=1000.0,
+                      budget_remaining=800.0)
+    scored = score_campaign(legacy)
+    assert scored.score > 0
+    assert scored.breakdown["rate"] == 1.0
+
+
 def test_payouts_requires_exactly_one_owner():
     client = _client(lambda r: httpx.Response(200, json={"data": []}))
     with pytest.raises(WhopError, match="exactly one"):

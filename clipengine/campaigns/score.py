@@ -56,7 +56,9 @@ def score_campaign(
         parts = {"rate": 0.0, "budget": 0.0, "familiarity": fam,
                  "simplicity": checklist.simplicity}
         return ScoredCampaign(campaign, checklist, 0.0, parts)
-    rate = campaign.reward_amount
+    # the original /bounties surface doesn't expose a per-submission reward;
+    # unknown rate scores neutral (1.0) so budget/familiarity/rules still rank
+    rate = campaign.reward_amount if campaign.reward_amount > 0 else 1.0
     budget = math.log1p(max(0.0, campaign.budget_remaining))
     parts = {
         "rate": rate,
