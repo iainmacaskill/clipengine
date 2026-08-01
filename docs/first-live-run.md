@@ -137,6 +137,11 @@ iteration of detector weights and thresholds.
 ## 7. After the run
 
 - [ ] Commit `docs/live-run-notes.md` with the validation numbers.
+- [ ] Stand up scheduled operation: copy `ops/env.example` to
+  `~/.clipengine/env` (chmod 600, fill in `CLIPENGINE_WHOP_API_KEY` and
+  `CLIPENGINE_CONFIG`), then run `ops/install-cron.sh` — campaigns sync
+  every 10 min (launch alerts), submissions sync hourly (48h window),
+  stats sync daily. Check `~/.clipengine/logs/` after the first firings.
 - [ ] Tune: detector weights / `target_duration` / music threshold based on notes.
 - [ ] If detection quality holds: start the roster outreach list (plan §11 step 1)
   and stand up the first channel. If it doesn't: iterate weights on this VOD's

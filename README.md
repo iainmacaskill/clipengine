@@ -154,6 +154,13 @@ clipengine queue run          # publishes everything due - run from cron every ~
 clipengine stats sync         # cron this daily (or more often for velocity data)
 clipengine stats report --csv performance.csv
 
+# scheduled operation: install the three sync jobs (campaigns every 10 min,
+# submissions hourly, stats daily) into your crontab - idempotent, and your
+# existing crontab entries are left untouched. Secrets go in ~/.clipengine/env
+# (copy ops/env.example), logs land in ~/.clipengine/logs/
+ops/install-cron.sh                    # or --with-queue-run / --remove
+
+
 # list a streamer's recent VODs (needs CLIPENGINE_TWITCH_CLIENT_ID / _SECRET)
 clipengine vods somestreamer
 ```

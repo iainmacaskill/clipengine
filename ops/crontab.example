@@ -1,0 +1,18 @@
+# clipengine scheduled jobs - install with ops/install-cron.sh, or paste into
+# crontab -e (fix the wrapper path). Secrets go in ~/.clipengine/env
+# (see ops/env.example), never here.
+#
+# Cadences:
+#   campaigns sync    every 10 min - M1 target is an alert within 15 min of a
+#                     campaign launch; budget pools are first-come-first-served
+#   submissions sync  hourly - advances pending submissions past Whop's 48h
+#                     auto-approval window; hourly keeps time-to-approval honest
+#   stats sync        daily - snapshots platform stats for published posts;
+#                     raise to hourly when view-velocity data starts mattering
+
+*/10 * * * *  /opt/clipengine/ops/clipengine-cron.sh campaigns-sync campaigns sync
+0 * * * *     /opt/clipengine/ops/clipengine-cron.sh submissions-sync submissions sync
+15 6 * * *    /opt/clipengine/ops/clipengine-cron.sh stats-sync stats sync
+
+# optional: publish queued clips as their slots come due
+#*/15 * * * * /opt/clipengine/ops/clipengine-cron.sh queue-run queue run
