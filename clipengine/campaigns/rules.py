@@ -124,6 +124,22 @@ def parse_rules(text: str) -> Checklist:
     return check
 
 
+def line_has_structured_requirement(line: str) -> bool:
+    """True if the line's requirement is captured by a structured field.
+
+    The compliance gate verifies structured requirements automatically;
+    required lines that carry none become manual confirmation items.
+    """
+    return bool(
+        _HASHTAG.search(line)
+        or _MENTION.search(line)
+        or _MIN_DUR.search(line)
+        or _MAX_DUR.search(line)
+        or _RANGE_DUR.search(line)
+        or any(kw in line.lower() for kw in _PLATFORMS)
+    )
+
+
 def _dedupe(items) -> list[str]:
     seen: dict[str, None] = {}
     for it in items:

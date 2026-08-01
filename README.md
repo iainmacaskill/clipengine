@@ -57,6 +57,15 @@ clipengine campaigns add --title "Neon clips" --cpm 2 --budget 5000 \
     --platforms tiktok,youtube --rules-file campaign_brief.txt
 clipengine campaigns rules --file campaign_brief.txt   # preview the parsed checklist
 
+# compliance gate: pre-flight a clip + caption against a campaign's rules -
+# duration, hashtags, mentions, platform, budget still live, source. Machine-
+# checkable rules pass/fail; the rest surface as manual confirmation items
+clipengine campaigns check clip.mp4 --campaign manual:neon-clips \
+    --caption "insane clutch #NeonClips @neon" --platform tiktok
+# publish and queue add enforce the same gate with --campaign: a failing
+# clip is refused (every rejected submission is unpaid work)
+clipengine publish tiktok clip.mp4 --title "clutch #NeonClips @neon" --campaign manual:neon-clips
+
 # record a streamer's permission first - ingestion is refused without it
 clipengine roster add somestreamer --source published_policy \
     --evidence "https://somestreamer.tv/clip-policy" --credit "@somestreamer in caption"
@@ -138,7 +147,8 @@ clipengine/
   models.py       shared dataclasses (candidates, transcript, signals, ...)
   roster.py       streamer permission roster (SQLite) - gates all ingestion
   campaigns/      Whop campaign intelligence: read-only bounty discovery,
-                  EV scoring, rules-text -> compliance checklist, launch alerts
+                  EV scoring, rules-text -> compliance checklist, launch alerts,
+                  pre-export compliance gate (enforced by publish/queue)
   analytics.py    performance snapshots + reporting for published posts
   review.py       human review queue - pass-rate metric, approvals feed publishing
   config.py       tunable pipeline config (TOML + env overrides)

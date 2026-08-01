@@ -281,7 +281,58 @@ def _cmd_auth(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _campaign_gate(
+    video: str,
+    campaign_id: str,
+    caption: str,
+    platform: str,
+    cfg: config.Config,
+    source: str = "",
+    credit: str = "",
+) -> bool:
+    """Compliance pre-flight against a stored campaign. True = clip may export."""
+    from .campaigns.gate import ClipFacts, preflight
+    from .campaigns.rules import parse_rules
+    from .campaigns.store import CampaignStore
+    from .edit.ffmpeg import probe
+
+    with CampaignStore(cfg.campaigns.campaigns_db) as store:
+        campaign = store.get(campaign_id)
+    if campaign is None:
+        print(f"unknown campaign: {campaign_id}", file=sys.stderr)
+        return False
+    report = preflight(
+        ClipFacts(
+            duration_s=probe(video).duration,
+            caption=caption,
+            credit_text=credit,
+            platform=platform,
+            source_url=source,
+        ),
+        parse_rules(campaign.rules_text),
+        campaign,
+    )
+    for r in report.results:
+        stream = sys.stderr if r.status != "pass" else sys.stdout
+        print(f"  {r.status:<6} [{r.name}] {r.detail}", file=stream)
+    return report.passed
+
+
 def _cmd_publish(args: argparse.Namespace, cfg: config.Config) -> int:
+    if args.campaign:
+        caption = " ".join(
+            part for part in (args.title, args.description or "", args.tags or "") if part
+        )
+        if not _campaign_gate(
+            args.video, args.campaign, caption, args.platform, cfg,
+            source=args.source or "",
+        ):
+            print(
+                "publish refused: campaign compliance gate failed - every rejected "
+                "clip is unpaid work. Fix the caption/clip or pick another campaign.",
+                file=sys.stderr,
+            )
+            return 3
     if not args.skip_music_check and not _screen_for_music(args.video, cfg):
         print(
             "publish refused: music-likely segments found. Mute them first "
@@ -340,6 +391,20 @@ def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
 
     with Queue(cfg.schedule.queue_db) as queue:
         if args.queue_action == "add":
+            if args.campaign:
+                caption = " ".join(
+                    part for part in (args.title, args.description or "", args.tags or "")
+                    if part
+                )
+                if not _campaign_gate(
+                    args.video, args.campaign, caption, args.platform, cfg,
+                    source=args.source or "",
+                ):
+                    print(
+                        "queue refused: campaign compliance gate failed",
+                        file=sys.stderr,
+                    )
+                    return 3
             post = queue.add(
                 args.platform,
                 args.account,
@@ -705,6 +770,13 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
         with open(args.file) as f:
             _print_checklist(parse_rules(f.read()))
         return 0
+    if args.campaigns_action == "check":
+        ok = _campaign_gate(
+            args.video, args.campaign, args.caption or "", args.platform or "",
+            cfg, source=args.source or "", credit=args.credit or "",
+        )
+        print("PASS - clip may export" if ok else "FAIL - do not export")
+        return 0 if ok else 1
 
     with CampaignStore(cfg.campaigns.campaigns_db) as store:
         if args.campaigns_action == "sync":
@@ -879,6 +951,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tags", help="comma-separated tags (YouTube)")
     p.add_argument("--privacy", help="youtube: private|unlisted|public; tiktok: SELF_ONLY|...")
     p.add_argument("--skip-music-check", action="store_true")
+    p.add_argument("--campaign", help="campaign id: run the compliance gate before publishing")
+    p.add_argument("--source", help="source URL of the footage (campaign source check)")
     p.set_defaults(func=_cmd_publish)
 
     p = sub.add_parser("game-events", help="scan a video with a game profile (killfeed/victory CV)")
@@ -915,6 +989,8 @@ def main(argv: list[str] | None = None) -> int:
     qa.add_argument("--description")
     qa.add_argument("--tags", help="comma-separated (YouTube)")
     qa.add_argument("--privacy")
+    qa.add_argument("--campaign", help="campaign id: run the compliance gate before queuing")
+    qa.add_argument("--source", help="source URL of the footage (campaign source check)")
     qa.set_defaults(func=_cmd_queue)
     ql = qsub.add_parser("list")
     ql.add_argument("--status", choices=["scheduled", "published", "failed", "cancelled"])
@@ -1051,6 +1127,16 @@ def main(argv: list[str] | None = None) -> int:
     cr = csub.add_parser("rules", help="parsed rules checklist for a campaign or a text file")
     cr.add_argument("id", nargs="?", help="stored campaign id")
     cr.add_argument("--file", help="parse this file instead of a stored campaign")
+    cc = csub.add_parser(
+        "check",
+        help="compliance gate: pre-flight a clip + caption against a campaign's rules",
+    )
+    cc.add_argument("video")
+    cc.add_argument("--campaign", required=True, help="stored campaign id")
+    cc.add_argument("--caption", help="the full text that will be posted with the clip")
+    cc.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    cc.add_argument("--source", help="source URL of the footage")
+    cc.add_argument("--credit", help="credit text burned into the clip")
     p.set_defaults(func=_cmd_campaigns)
 
     p = sub.add_parser("vods", help="list a streamer's recent VODs")
