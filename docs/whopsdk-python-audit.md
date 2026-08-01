@@ -111,3 +111,21 @@ must provide a valid App API key". An App API key + `X-Whop-App-Id` header
 scope-gated per app: `GET /bounties` requires the **`bounty:basic:read`**
 scope, granted in the app's permissions section of the dashboard. Grant
 payout/ledger read scopes at the same time for the reconciliation step.
+
+Final production finding (2026-08-01, working App API key + approved
+`bounty:basic:read`): `GET /bounties` returns a well-formed empty list for a
+business hosting no bounties — the endpoint is **business-scoped**, not a
+marketplace-wide discover feed. Confirmed `page_info` shape in production:
+`{start_cursor, end_cursor, has_next_page, has_previous_page}` (client
+handles null cursors correctly). Conclusion, matching the original audit:
+marketplace-wide Content Rewards discovery is app/web-only, so operator
+workflow is browse the discover feed manually -> `campaigns add` (scoring,
+rules parsing, gating, and tracking all work on manual entries), with
+`campaigns sync` cronned so API-visible bounties light up automatically if
+Whop widens the surface or the business hosts/joins bounties.
+
+Working auth recipe, verified end to end: create an app in the developer
+dashboard -> add `bounty:basic:read` to its permissions -> approve at
+Dashboard -> Settings -> Authorized apps (new scopes do NOT carry over to
+existing keys/installs until accepted; a fresh API key after approval
+works) -> Bearer <App API key> + `X-Whop-App-Id` + `Api-Version-Date`.
