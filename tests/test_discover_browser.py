@@ -54,6 +54,30 @@ def test_browser_render_recovers_client_rendered_cards(tmp_path, monkeypatch):
     assert found["Pacinos Hair"].budget_total == 50000  # K suffix path
 
 
+def test_browser_render_harvests_iframe_content(tmp_path, monkeypatch):
+    """Whop app pages render their content in an iframe - cards must be
+    recovered from child frames, not just the top-level page."""
+    pytest.importorskip("playwright.sync_api")
+    import os
+
+    from clipengine.campaigns.discover import render_discover
+
+    bundled = "/opt/pw-browsers/chromium"
+    if os.path.exists(bundled):
+        monkeypatch.setenv("CLIPENGINE_CHROMIUM_PATH", bundled)
+
+    (tmp_path / "child.html").write_text(JS_RENDERED_PAGE)
+    parent = tmp_path / "parent.html"
+    parent.write_text(
+        '<html><body><h1>Content Rewards</h1>'
+        '<iframe src="child.html" width="800" height="600"></iframe>'
+        "</body></html>"
+    )
+    html = render_discover(parent.as_uri(), wait_ms=300, scrolls=1)
+    found = {d.title for d in parse_discover(html)}
+    assert found == {"Roobet Clips", "Pacinos Hair"}
+
+
 def test_render_without_playwright_gives_install_hint(monkeypatch):
     import builtins
 

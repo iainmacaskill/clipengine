@@ -147,9 +147,32 @@ def render_discover(url: str = DISCOVER_URL, wait_ms: int = 4000, scrolls: int =
             for _ in range(scrolls):  # trigger lazy-loading below the fold
                 page.mouse.wheel(0, 2400)
                 page.wait_for_timeout(900)
-            return page.content()
+            # wait until money text exists in SOME frame (cards load late,
+            # and Whop app content renders inside an iframe, not the page)
+            for _ in range(20):
+                if any("$" in (_frame_text(f) or "") for f in page.frames):
+                    break
+                page.wait_for_timeout(500)
+            page.wait_for_timeout(800)
+            return "\n".join(
+                content for f in page.frames if (content := _frame_content(f))
+            )
         finally:
             browser.close()
+
+
+def _frame_text(frame) -> str:
+    try:
+        return frame.evaluate("document.body ? document.body.innerText : ''")
+    except Exception:  # detached/navigating frames mid-render
+        return ""
+
+
+def _frame_content(frame) -> str:
+    try:
+        return frame.content()
+    except Exception:
+        return ""
 
 
 def diagnose(html: str) -> str:
