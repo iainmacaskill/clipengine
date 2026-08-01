@@ -33,6 +33,13 @@ Only Twitch is needed for the core validation; YouTube/TikTok can follow later.
   `export CLIPENGINE_TT_CLIENT_KEY=... _SECRET=...`
   **Submit the content-posting audit immediately** — until it passes, posts are
   forced to SELF_ONLY visibility. Longest external lead time in the project.
+- [ ] **Anthropic (optional but recommended)**: `export ANTHROPIC_API_KEY=...` +
+  `pip install -e ".[llm]"` — enables automatic hook/title/hashtag generation
+  during `process` (~a cent per clip). Without it the pipeline runs unchanged,
+  just without suggestions.
+- [ ] **Twitch user token (optional, live mode)**: a user OAuth token with the
+  `clips:edit` scope as `CLIPENGINE_TWITCH_USER_TOKEN` — only needed for
+  `clipengine live` clip capture; the dry-run calibration below works without it.
 
 ## 3. Pick the source and record permission
 
@@ -63,8 +70,12 @@ cat candidates.json
 # 3. sanity-check the facecam detection
 clipengine facecam vod.mp4
 
-# 4. render the top candidate (start/end from candidates.json)
-clipengine render vod.mp4 --start <S> --end <E> -o clip1.mp4
+# 4. render the top candidate (start/end from candidates.json; --streamer burns
+#    their roster credit in). Or skip 2-4 and run the whole batch in one command:
+#    clipengine process vod.mp4 --chat chat.jsonl --streamer <streamer> -o clips/
+#    (renders top-N credited clips, music-screens, and - with ANTHROPIC_API_KEY -
+#    generates hooks/titles/hashtags and burns the hook into the first 2.5s)
+clipengine render vod.mp4 --start <S> --end <E> --streamer <streamer> -o clip1.mp4
 
 # 5. DMCA screen (also runs automatically inside publish)
 clipengine music-check clip1.mp4
@@ -101,6 +112,12 @@ clipengine publish tiktok clip1.mp4 --title "<hook>"   # SELF_ONLY until audit
   was calibrated on synthetic audio and probably needs tuning here.
 - [ ] **Timing + cost** — wall-clock per stage on your hardware; this feeds the
   $/clip compute model in the product plan (§8).
+- [ ] **Hook/title quality (if ANTHROPIC_API_KEY set)** — are the generated
+  hooks/titles postable as-is, or do they need editing? Note the edit rate.
+- [ ] **Live-mode calibration (optional, no clips created)** — while the streamer
+  is live: `clipengine live <streamer> -o live_test/ --dry-run` for ~an hour.
+  Do spike counts feel right (a few per hour, at genuinely hype moments)? Tune
+  the `[live]` thresholds in config and note chat size vs settings.
 
 Write the numbers into `docs/live-run-notes.md` (create it) — they drive the next
 iteration of detector weights and thresholds.
