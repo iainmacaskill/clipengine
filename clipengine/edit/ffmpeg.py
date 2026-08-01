@@ -13,16 +13,26 @@ from ..models import FacecamRegion, SourceVideo
 
 
 def probe(path: str) -> SourceVideo:
-    out = subprocess.run(
-        [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=width,height", "-show_entries", "format=duration",
-            "-of", "json", path,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    import os
+
+    if not os.path.exists(path):
+        raise ValueError(f"video file not found: {path}")
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-show_entries", "format=duration",
+                "-of", "json", path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as e:
+        raise ValueError(
+            f"cannot read {path} as video ({(e.stderr or '').strip()[:200] or 'ffprobe failed'})"
+            " - is it a complete, valid video file?"
+        ) from e
     data = json.loads(out)
     stream = data["streams"][0]
     return SourceVideo(
