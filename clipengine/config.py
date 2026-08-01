@@ -114,7 +114,7 @@ class CampaignsConfig:
     statuses: list[str] = field(default_factory=lambda: ["open"])
     goal_types: list[str] = field(default_factory=lambda: ["clipping", "ugc_content"])
     alert_webhook: str = ""  # Discord-compatible webhook (CLIPENGINE_ALERT_WEBHOOK)
-    alert_min_score: float = 3.0
+    alert_min_score: float = 3.0  # set per operator; rehearsal showed 3.0 lets junk campaigns through
     # source-material familiarity: keyword -> weight, matched on title/brand/rules
     familiarity: dict[str, float] = field(default_factory=dict)
 

@@ -50,13 +50,14 @@ class WhopClient:
         self,
         api_key: str,
         client: httpx.Client | None = None,
-        base_url: str = BASE_URL,
+        base_url: str | None = None,
     ):
         if not api_key:
             raise WhopError(
                 "Whop API key required: set CLIPENGINE_WHOP_API_KEY (or WHOP_API_KEY)"
             )
-        self._base = base_url.rstrip("/")
+        # WHOP_BASE_URL override mirrors the official SDK (test/staging endpoints)
+        self._base = (base_url or os.environ.get("WHOP_BASE_URL") or BASE_URL).rstrip("/")
         self._client = client or httpx.Client(timeout=30.0)
         self._headers = {"Authorization": f"Bearer {api_key}"}
 

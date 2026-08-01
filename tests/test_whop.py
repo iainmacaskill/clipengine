@@ -40,6 +40,24 @@ def test_requires_api_key():
         WhopClient("")
 
 
+def test_base_url_env_override(monkeypatch):
+    monkeypatch.setenv("WHOP_BASE_URL", "http://127.0.0.1:9/api/v1/")
+    hit = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hit["url"] = str(request.url)
+        return httpx.Response(200, json={"data": [], "page_info": {}})
+
+    client = WhopClient("k", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client.list_bounties()
+    assert hit["url"].startswith("http://127.0.0.1:9/api/v1/workforce/bounties")
+    # explicit base_url beats the env
+    client = WhopClient("k", client=httpx.Client(transport=httpx.MockTransport(handler)),
+                        base_url="http://other/api/v1")
+    client.list_bounties()
+    assert hit["url"].startswith("http://other/api/v1/")
+
+
 def test_list_bounties_paginates_and_stays_read_only():
     requests = []
 
