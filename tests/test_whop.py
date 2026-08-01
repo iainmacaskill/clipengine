@@ -40,6 +40,33 @@ def test_requires_api_key():
         WhopClient("")
 
 
+def test_sends_sdk_auth_headers(monkeypatch):
+    monkeypatch.setenv("WHOP_APP_ID", "app_test123")
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["headers"] = request.headers
+        return httpx.Response(200, json={"data": [], "page_info": {}})
+
+    _client(handler).list_bounties()
+    assert seen["headers"]["Api-Version-Date"] == "2026-07-08-1"
+    assert seen["headers"]["X-Whop-App-Id"] == "app_test123"
+
+
+def test_no_app_id_header_without_env(monkeypatch):
+    for env in ("CLIPENGINE_WHOP_APP_ID", "WHOP_APP_ID"):
+        monkeypatch.delenv(env, raising=False)
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["headers"] = request.headers
+        return httpx.Response(200, json={"data": [], "page_info": {}})
+
+    _client(handler).list_bounties()
+    assert "X-Whop-App-Id" not in seen["headers"]
+    assert seen["headers"]["Api-Version-Date"] == "2026-07-08-1"
+
+
 def test_base_url_env_override(monkeypatch):
     monkeypatch.setenv("WHOP_BASE_URL", "http://127.0.0.1:9/api/v1/")
     hit = {}

@@ -37,6 +37,8 @@ from .models import REWARD_PER_SUBMISSION, Campaign
 BASE_URL = "https://api.whop.com/api/v1"
 DEFAULT_GOAL_TYPES = ("clipping", "ugc_content")
 API_KEY_ENVS = ("CLIPENGINE_WHOP_API_KEY", "WHOP_API_KEY")
+APP_ID_ENVS = ("CLIPENGINE_WHOP_APP_ID", "WHOP_APP_ID")
+API_VERSION = "2026-07-08-1"  # the SDK's default Api-Version-Date - sent always
 
 
 class WhopError(RuntimeError):
@@ -57,15 +59,26 @@ class WhopClient:
         api_key: str,
         client: httpx.Client | None = None,
         base_url: str | None = None,
+        app_id: str | None = None,
     ):
         if not api_key:
             raise WhopError(
-                "Whop API key required: set CLIPENGINE_WHOP_API_KEY (or WHOP_API_KEY)"
+                "Whop API key required: set CLIPENGINE_WHOP_API_KEY (or WHOP_API_KEY). "
+                "The API authenticates apps - create one in the Whop dashboard's "
+                "developer section and use its App API key (+ WHOP_APP_ID)."
             )
         # WHOP_BASE_URL override mirrors the official SDK (test/staging endpoints)
         self._base = (base_url or os.environ.get("WHOP_BASE_URL") or BASE_URL).rstrip("/")
         self._client = client or httpx.Client(timeout=30.0)
-        self._headers = {"Authorization": f"Bearer {api_key}"}
+        # header set mirrors the SDK: Api-Version-Date always; app id when known
+        self._headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Api-Version-Date": API_VERSION,
+        }
+        if app_id is None:
+            app_id = next((os.environ[e] for e in APP_ID_ENVS if os.environ.get(e)), None)
+        if app_id:
+            self._headers["X-Whop-App-Id"] = app_id
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         resp = self._client.get(self._base + path, params=params, headers=self._headers)
