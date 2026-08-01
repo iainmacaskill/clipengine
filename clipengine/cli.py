@@ -675,6 +675,145 @@ def _cmd_roster(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _print_checklist(check) -> None:
+    if check.hashtags:
+        print(f"  hashtags: {' '.join('#' + h for h in check.hashtags)}")
+    if check.mentions:
+        print(f"  mentions: {' '.join('@' + m for m in check.mentions)}")
+    if check.min_duration_s is not None or check.max_duration_s is not None:
+        lo = f"{check.min_duration_s:g}s" if check.min_duration_s is not None else "-"
+        hi = f"{check.max_duration_s:g}s" if check.max_duration_s is not None else "-"
+        print(f"  duration: {lo} .. {hi}")
+    if check.platforms:
+        print(f"  platforms: {', '.join(check.platforms)}")
+    for line in check.required:
+        print(f"  must: {line}")
+    for line in check.banned:
+        print(f"  banned: {line}")
+    for link in check.links:
+        print(f"  source: {link}")
+    print(f"  complexity: {check.complexity} (simplicity {check.simplicity:.2f})")
+
+
+def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .campaigns.models import Campaign
+    from .campaigns.rules import parse_rules
+    from .campaigns.score import rank, score_campaign
+    from .campaigns.store import CampaignStore
+
+    if args.campaigns_action == "rules" and args.file:
+        with open(args.file) as f:
+            _print_checklist(parse_rules(f.read()))
+        return 0
+
+    with CampaignStore(cfg.campaigns.campaigns_db) as store:
+        if args.campaigns_action == "sync":
+            from .campaigns import alerts
+            from .campaigns.whop import WhopClient, WhopError
+
+            try:
+                client = WhopClient(cfg.campaigns.api_key)
+            except WhopError as e:
+                print(str(e), file=sys.stderr)
+                return 2
+            fetched: list[Campaign] = []
+            for status in cfg.campaigns.statuses:
+                fetched.extend(
+                    client.campaigns(
+                        status=status,
+                        goal_types=tuple(cfg.campaigns.goal_types) or None,
+                        with_rules=not args.no_rules,
+                    )
+                )
+            new = store.upsert(fetched)
+            print(f"synced {len(fetched)} campaign(s), {len(new)} new")
+            alertable = [
+                s for s in rank(new, cfg.campaigns.familiarity)
+                if s.score >= cfg.campaigns.alert_min_score
+            ]
+            for s in alertable:
+                print(f"  new: [{s.score:.1f}] {s.campaign.title} ({s.campaign.id})")
+            if alertable and cfg.campaigns.alert_webhook:
+                ok = alerts.notify(cfg.campaigns.alert_webhook, alertable)
+                print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)} campaign(s))")
+        elif args.campaigns_action == "add":
+            slug = args.id or "manual:" + "-".join(args.title.lower().split())[:48]
+            rules_text = args.rules or ""
+            if args.rules_file:
+                with open(args.rules_file) as f:
+                    rules_text = f.read()
+            campaign = Campaign(
+                id=slug,
+                source="manual",
+                title=args.title,
+                brand=args.brand or "",
+                goal_type=args.goal,
+                status="open",
+                currency=args.currency,
+                reward_model="cpm",
+                reward_amount=args.cpm,
+                budget_total=args.budget,
+                budget_remaining=args.remaining if args.remaining is not None else args.budget,
+                platforms=[p.strip() for p in (args.platforms or "").split(",") if p.strip()],
+                rules_text=rules_text,
+                url=args.url or "",
+            )
+            store.upsert([campaign])
+            scored = score_campaign(campaign, cfg.campaigns.familiarity)
+            print(f"added {campaign.id} [score {scored.score:.1f}]")
+        elif args.campaigns_action == "list":
+            scored = rank(store.list(status=args.status), cfg.campaigns.familiarity)
+            if not scored:
+                print("no campaigns - run 'campaigns sync' or 'campaigns add'")
+            for s in scored[: args.top] if args.top else scored:
+                c = s.campaign
+                reward = (
+                    f"{c.reward_amount:g}/1k"
+                    if c.reward_model == "cpm"
+                    else f"{c.reward_amount:g}/sub"
+                )
+                print(
+                    f"[{s.score:6.1f}] {c.id:<28} {c.status:<9} {reward:>9}  "
+                    f"{c.budget_remaining:>9g} left  {c.title[:40]}"
+                )
+        elif args.campaigns_action == "show":
+            c = store.get(args.id)
+            if c is None:
+                print(f"unknown campaign: {args.id}", file=sys.stderr)
+                return 1
+            s = score_campaign(c, cfg.campaigns.familiarity)
+            reward_unit = "per 1k views" if c.reward_model == "cpm" else "per submission"
+            print(f"{c.title} ({c.id}, {c.source})")
+            print(f"  brand: {c.brand or '-'}  goal: {c.goal_type or '-'}  status: {c.status}")
+            print(f"  reward: {c.reward_amount:g} {c.currency} {reward_unit}")
+            print(
+                f"  budget: {c.budget_remaining:g}/{c.budget_total:g} {c.currency} remaining"
+                + (f", {c.spots_remaining} spot(s)" if c.spots_remaining is not None else "")
+            )
+            print(f"  score: {s.score:.2f}  {s.breakdown}")
+            if c.rules_text:
+                print("  rules checklist:")
+                _print_checklist(s.checklist)
+            history = store.history(c.id)
+            if len(history) > 1:
+                print("  budget history:")
+                for snap in history[-args.snapshots:]:
+                    print(f"    {snap.at}  {snap.budget_remaining:g} remaining ({snap.status})")
+        else:  # rules for a stored campaign
+            if not args.id:
+                print("give a campaign id or --file", file=sys.stderr)
+                return 1
+            c = store.get(args.id)
+            if c is None:
+                print(f"unknown campaign: {args.id}", file=sys.stderr)
+                return 1
+            if not c.rules_text:
+                print("no rules text stored - re-sync without --no-rules or add --rules")
+                return 1
+            _print_checklist(parse_rules(c.rules_text))
+    return 0
+
+
 def _cmd_vods(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.twitch import TwitchClient
 
@@ -876,6 +1015,43 @@ def main(argv: list[str] | None = None) -> int:
     rl = rsub.add_parser("list")
     rl.add_argument("--status", choices=["allowed", "revoked"])
     p.set_defaults(func=_cmd_roster)
+
+    p = sub.add_parser(
+        "campaigns",
+        help="Whop campaign intelligence: discover, score, and track paid clipping campaigns",
+    )
+    csub = p.add_subparsers(dest="campaigns_action", required=True)
+    cs = csub.add_parser(
+        "sync",
+        help="fetch open Workforce Bounties (read-only), store, alert on new high-scorers",
+    )
+    cs.add_argument("--no-rules", action="store_true",
+                    help="skip per-bounty detail fetches (faster; keeps stored rules)")
+    ca = csub.add_parser(
+        "add", help="manually add a CPM Content Rewards campaign (no public API for these)"
+    )
+    ca.add_argument("--title", required=True)
+    ca.add_argument("--cpm", type=float, required=True, help="reward per 1,000 verified views")
+    ca.add_argument("--budget", type=float, required=True, help="total campaign budget")
+    ca.add_argument("--remaining", type=float, help="remaining budget (default: total)")
+    ca.add_argument("--brand")
+    ca.add_argument("--goal", default="clipping", choices=["clipping", "ugc_content"])
+    ca.add_argument("--currency", default="usd")
+    ca.add_argument("--platforms", help="comma-separated, e.g. tiktok,youtube,instagram")
+    ca.add_argument("--rules", help="rules text inline")
+    ca.add_argument("--rules-file", help="file containing the campaign rules/brief")
+    ca.add_argument("--url", help="campaign page URL")
+    ca.add_argument("--id", help="campaign id (default: manual:<title-slug>)")
+    cl = csub.add_parser("list", help="stored campaigns ranked by score")
+    cl.add_argument("--status", help="filter, e.g. open")
+    cl.add_argument("--top", type=int, help="show only the top N")
+    cw = csub.add_parser("show", help="one campaign: score breakdown, rules, budget history")
+    cw.add_argument("id")
+    cw.add_argument("--snapshots", type=int, default=10, help="history rows to show")
+    cr = csub.add_parser("rules", help="parsed rules checklist for a campaign or a text file")
+    cr.add_argument("id", nargs="?", help="stored campaign id")
+    cr.add_argument("--file", help="parse this file instead of a stored campaign")
+    p.set_defaults(func=_cmd_campaigns)
 
     p = sub.add_parser("vods", help="list a streamer's recent VODs")
     p.add_argument("streamer")

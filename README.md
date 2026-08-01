@@ -1,15 +1,21 @@
 # ClipEngine
 
-Automated Twitch-to-Shorts clip pipeline: ingest streams from opted-in streamers,
-detect highlight moments with multi-signal AI scoring (chat velocity, audio
-excitement, transcript analysis), edit them into vertical short-form video, caption
-them, and publish to TikTok and YouTube Shorts — monetised through platform
-creator-reward programmes on an own-brand, permissioned clip network.
+Automated stream-to-Shorts clip pipeline: discover paid clipping campaigns on
+Whop Content Rewards, ingest their authorised source material, detect highlight
+moments with multi-signal AI scoring (chat velocity, audio excitement, transcript
+analysis), edit them into vertical short-form video, caption them, and publish to
+TikTok and YouTube Shorts — monetised through campaign CPM/bounty payouts, with
+platform creator-reward programmes as a secondary channel.
 
 ## Contents
 
-- [`docs/product-plan.md`](docs/product-plan.md) — full product plan: business models,
-  rights strategy, pipeline architecture, MVP scope, roadmap, unit economics, risks.
+- [`docs/whop-clipping-dev-brief.md`](docs/whop-clipping-dev-brief.md) — the
+  governing dev brief for the Whop Content Rewards pivot: phases, hard lines,
+  milestones. Companions: [prior art](docs/whop-clipping-prior-art.md),
+  [Whop SDK audit](docs/whopsdk-python-audit.md),
+  [revenue research](docs/research-twitch-clipping-revenue.md).
+- [`docs/product-plan.md`](docs/product-plan.md) — original product plan (pre-pivot):
+  business models, rights strategy, pipeline architecture, unit economics, risks.
 - [`docs/spike-notes.md`](docs/spike-notes.md) — findings from the first technical
   spike (end-to-end pipeline trial using the public `clipify` Claude Code skill).
 - [`docs/first-live-run.md`](docs/first-live-run.md) — checklist for the first
@@ -25,16 +31,31 @@ edit (frame-accurate trim, 9:16 facecam-top layout), and captioning (opus-style 
 stages, permission-gated ingest (chat replay + VOD downloaders), music-DMCA
 screening, and publishing clients for YouTube (Data API v3 resumable upload) and
 TikTok (Content Posting API direct-post flow) with OAuth token management and a
-music-check gate before every publish. All network integrations are tested against
-mocked transports; live runs need real credentials (Google Cloud OAuth client;
-TikTok developer app — unaudited apps can only post SELF_ONLY, submit the audit
-early). Next: first live run on real VOD footage from a clip-permissive streamer.
+music-check gate before every publish. The full pipeline passed a synthetic
+dress rehearsal ([results](docs/dress-rehearsal-2026-08.md)). Now pivoting to
+the [Whop Content Rewards brief](docs/whop-clipping-dev-brief.md): Phase 1
+campaign intelligence is in (`clipengine campaigns` — read-only Workforce
+Bounties discovery, EV scoring, rules parsing, launch alerts). All network
+integrations are tested against mocked transports; live runs need real
+credentials (Whop API key; Google Cloud OAuth client; TikTok developer app —
+unaudited apps can only post SELF_ONLY, submit the audit early).
 
 ## Quick start
 
 ```bash
 pip install -e ".[dev]"        # + ".[asr]" for faster-whisper captions
 pytest
+
+# campaign intelligence (Whop Content Rewards): discover open clipping bounties
+# (read-only; needs CLIPENGINE_WHOP_API_KEY), score them, alert on launches
+clipengine campaigns sync
+clipengine campaigns list --status open --top 10
+clipengine campaigns show bnty_xxx            # score breakdown, rules, budget history
+
+# CPM-per-views campaigns have no public API - key them in manually
+clipengine campaigns add --title "Neon clips" --cpm 2 --budget 5000 \
+    --platforms tiktok,youtube --rules-file campaign_brief.txt
+clipengine campaigns rules --file campaign_brief.txt   # preview the parsed checklist
 
 # record a streamer's permission first - ingestion is refused without it
 clipengine roster add somestreamer --source published_policy \
@@ -116,6 +137,8 @@ Chat log format is JSONL: `{"offset": seconds_from_start, "user": "...", "text":
 clipengine/
   models.py       shared dataclasses (candidates, transcript, signals, ...)
   roster.py       streamer permission roster (SQLite) - gates all ingestion
+  campaigns/      Whop campaign intelligence: read-only bounty discovery,
+                  EV scoring, rules-text -> compliance checklist, launch alerts
   analytics.py    performance snapshots + reporting for published posts
   review.py       human review queue - pass-rate metric, approvals feed publishing
   config.py       tunable pipeline config (TOML + env overrides)

@@ -108,6 +108,18 @@ class AnalyticsConfig:
 
 
 @dataclass
+class CampaignsConfig:
+    campaigns_db: str = os.path.expanduser("~/.clipengine/campaigns.db")
+    api_key: str = ""       # CLIPENGINE_WHOP_API_KEY / WHOP_API_KEY
+    statuses: list[str] = field(default_factory=lambda: ["open"])
+    goal_types: list[str] = field(default_factory=lambda: ["clipping", "ugc_content"])
+    alert_webhook: str = ""  # Discord-compatible webhook (CLIPENGINE_ALERT_WEBHOOK)
+    alert_min_score: float = 3.0
+    # source-material familiarity: keyword -> weight, matched on title/brand/rules
+    familiarity: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     edit: EditConfig = field(default_factory=EditConfig)
@@ -117,6 +129,7 @@ class Config:
     tiktok: TikTokConfig = field(default_factory=TikTokConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
+    campaigns: CampaignsConfig = field(default_factory=CampaignsConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     live: LiveConfig = field(default_factory=LiveConfig)
     work_dir: str = "/tmp/clipengine"
@@ -147,4 +160,10 @@ def load(path: str | None = None) -> Config:
     cfg.youtube.client_secret = env("CLIPENGINE_YT_CLIENT_SECRET", cfg.youtube.client_secret)
     cfg.tiktok.client_key = env("CLIPENGINE_TT_CLIENT_KEY", cfg.tiktok.client_key)
     cfg.tiktok.client_secret = env("CLIPENGINE_TT_CLIENT_SECRET", cfg.tiktok.client_secret)
+    cfg.campaigns.api_key = env(
+        "CLIPENGINE_WHOP_API_KEY", env("WHOP_API_KEY", cfg.campaigns.api_key)
+    )
+    cfg.campaigns.alert_webhook = env(
+        "CLIPENGINE_ALERT_WEBHOOK", cfg.campaigns.alert_webhook
+    )
     return cfg
