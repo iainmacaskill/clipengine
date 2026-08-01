@@ -21,7 +21,7 @@ Strategies, tried in order:
 from __future__ import annotations
 
 import html as html_mod
-import json
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -29,7 +29,8 @@ import httpx
 
 from .models import Campaign
 
-DISCOVER_URL = "https://whop.com/discover/content-rewards/"
+# /discover/content-rewards/ redirects here (Content Rewards is a Whop app)
+DISCOVER_URL = "https://whop.com/discover/app/app_QRxsQodZgK1r4D/"
 BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -105,6 +106,63 @@ def fetch_discover(url: str = DISCOVER_URL, client: httpx.Client | None = None) 
                                     "Accept": "text/html,application/xhtml+xml"})
     resp.raise_for_status()
     return resp.text
+
+
+def render_discover(url: str = DISCOVER_URL, wait_ms: int = 4000, scrolls: int = 4) -> str:
+    """Render the page in headless Chromium and return the live DOM's HTML.
+
+    The discover feed is client-rendered - the campaign cards exist only
+    after the page's JavaScript runs, so a plain GET never sees them. This
+    is still read-only discovery: a browser viewing the public page. Needs
+    the optional dependency: pip install "clipengine[browser]" then
+    'playwright install chromium'.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        raise RuntimeError(
+            "browser rendering needs playwright: pip install 'clipengine[browser]' "
+            "&& playwright install chromium"
+        ) from e
+    launch_opts: dict = {"headless": True}
+    # explicit browser binary (e.g. a system Chromium, or a preinstalled
+    # bundle whose revision differs from the pip playwright's expectation)
+    exe = os.environ.get("CLIPENGINE_CHROMIUM_PATH")
+    if exe:
+        launch_opts["executable_path"] = exe
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(**launch_opts)
+        try:
+            page = browser.new_page(user_agent=BROWSER_UA)
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(wait_ms)
+            for _ in range(scrolls):  # trigger lazy-loading below the fold
+                page.mouse.wheel(0, 2400)
+                page.wait_for_timeout(900)
+            return page.content()
+        finally:
+            browser.close()
+
+
+def diagnose(html: str) -> str:
+    """Compact report of what a page contains when no cards parsed -
+    money-like tokens and structural markers, for tuning the patterns."""
+    text_sample = re.findall(r"\$[0-9][0-9.,]*[^\"<>]{0,30}", html)[:8]
+    markers = {
+        "bytes": len(html),
+        "__next_f": html.count("__next_f"),
+        "__NEXT_DATA__": html.count("__NEXT_DATA__"),
+        "bot check ('Just a moment')": len(re.findall(r"just a moment", html, re.I)),
+        "rate keys": len(re.findall(_MONEY_KEY.format("|".join(_RATE_KEYS)),
+                                    html.replace('\\"', '"'))),
+        "'/ 1K' rate texts (anywhere)": len(_RATE_RE.findall(html)),
+        # rates present only inside <script> = client-rendered: use --browser
+        "'/ 1K' rate texts (visible)": len(_RATE_RE.findall(
+            re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I))),
+    }
+    lines = [f"  {k}: {v}" for k, v in markers.items()]
+    lines.append("  $-token samples: " + (" | ".join(text_sample) or "(none)"))
+    return "\n".join(lines)
 
 
 def parse_discover(html: str) -> list[Discovered]:

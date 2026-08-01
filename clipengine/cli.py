@@ -842,23 +842,34 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
             if args.file:
                 with open(args.file, encoding="utf-8", errors="replace") as f:
                     page = f.read()
+            elif args.browser:
+                try:
+                    page = discover.render_discover(args.url)
+                except RuntimeError as e:
+                    print(str(e), file=sys.stderr)
+                    return 2
             else:
                 try:
                     page = discover.fetch_discover(args.url)
                 except _httpx.HTTPError as e:
                     print(
-                        f"fetch failed ({e}). The discover page sits behind a "
-                        "bot-checking CDN - save it from your browser (File > Save "
-                        "Page As) and re-run with --file page.html",
+                        f"fetch failed ({e}). Try --browser (renders the page in "
+                        "headless Chromium), or save the page from your browser "
+                        "and re-run with --file page.html",
                         file=sys.stderr,
                     )
                     return 2
+            if args.dump:
+                with open(args.dump, "w", encoding="utf-8") as f:
+                    f.write(page)
+                print(f"page saved -> {args.dump}", file=sys.stderr)
             found = discover.parse_discover(page)
             if not found:
                 print(
-                    "no campaign cards parsed - the page structure may have "
-                    "changed. Save the page from your browser and share it so the "
-                    "parser can be updated; meanwhile 'campaigns add' still works.",
+                    "no campaign cards parsed. The feed is client-rendered, so a "
+                    "plain fetch sees no cards - try --browser (pip install "
+                    "'clipengine[browser]' && playwright install chromium). "
+                    "Page diagnostics:\n" + discover.diagnose(page),
                     file=sys.stderr,
                 )
                 return 1
@@ -1404,8 +1415,12 @@ def main(argv: list[str] | None = None) -> int:
         help="parse the public Content Rewards discover feed, rank by best rewards "
              "(read-only; the CPM campaigns have no API)",
     )
-    cd_.add_argument("--url", default="https://whop.com/discover/content-rewards/")
+    cd_.add_argument("--url", default="https://whop.com/discover/app/app_QRxsQodZgK1r4D/")
     cd_.add_argument("--file", help="parse a browser-saved copy of the page instead of fetching")
+    cd_.add_argument("--browser", action="store_true",
+                     help="render in headless Chromium first (the feed is client-"
+                          "rendered; needs clipengine[browser] + playwright install chromium)")
+    cd_.add_argument("--dump", help="also save the fetched/rendered page HTML to this file")
     cd_.add_argument("--top", type=int, help="show only the top N")
     cd_.add_argument("--min-cpm", type=float, help="drop campaigns paying less per 1k views")
     cd_.add_argument("--sort", choices=["score", "rate", "budget"], default="score",
