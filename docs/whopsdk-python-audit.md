@@ -103,3 +103,11 @@ clipengine's client tries `/workforce/bounties` first and falls back to
 `/bounties` on 404, translating the vocabulary — so it upgrades itself the
 day Whop ships the workforce surface. Payouts/ledger endpoints have not yet
 been probed against production.
+
+Auth model, confirmed against production (third sync attempt): the REST API
+authenticates **apps** — dashboard/company keys are refused with 400 "You
+must provide a valid App API key". An App API key + `X-Whop-App-Id` header
+(SDK behaviour, mirrored by the client) authenticates, after which access is
+scope-gated per app: `GET /bounties` requires the **`bounty:basic:read`**
+scope, granted in the app's permissions section of the dashboard. Grant
+payout/ledger read scopes at the same time for the reconciliation step.
