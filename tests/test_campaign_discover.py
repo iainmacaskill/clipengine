@@ -127,4 +127,6 @@ def test_cli_unparseable_page_exits_1(env, tmp_path, capsys):
     bad.write_text("<html><body>nothing here</body></html>")
     rc = cli.main(["--config", env[0], "campaigns", "discover", "--file", str(bad)])
     assert rc == 1
-    assert "campaigns add" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "--browser" in err          # points at the client-rendered fix
+    assert "rate texts (visible): 0" in err  # diagnostics printed automatically
