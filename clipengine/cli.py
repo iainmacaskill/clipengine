@@ -881,7 +881,16 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            candidates = [d.to_campaign() for d in found
+            plausible = [d for d in found if d.rate <= args.max_cpm]
+            suspect = len(found) - len(plausible)
+            if suspect:
+                print(
+                    f"({suspect} dropped: rate above --max-cpm {args.max_cpm:g}/1k - "
+                    "real CPMs run ~$0.50-$15; higher usually means a mis-parsed "
+                    "card, verify on the page)",
+                    file=sys.stderr,
+                )
+            candidates = [d.to_campaign() for d in plausible
                           if d.rate >= (args.min_cpm or 0.0)]
             scored = rank(candidates, cfg.campaigns.familiarity)
             if args.sort == "rate":
@@ -896,7 +905,7 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                     f"[{s.score:6.1f}] {c.reward_amount:>5g}/1k  "
                     f"{c.budget_remaining:>10g} left  {plats:<28} {c.title[:44]}"
                 )
-            dropped = len(found) - len(candidates)
+            dropped = len(plausible) - len(candidates)
             if dropped:
                 print(f"({dropped} below --min-cpm {args.min_cpm:g})", file=sys.stderr)
             if args.add:
@@ -1433,6 +1442,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="print the raw text lines around each campaign card (parser tuning)")
     cd_.add_argument("--top", type=int, help="show only the top N")
     cd_.add_argument("--min-cpm", type=float, help="drop campaigns paying less per 1k views")
+    cd_.add_argument("--max-cpm", type=float, default=25.0,
+                     help="plausibility ceiling - rates above this are usually "
+                          "mis-parsed cards (default 25)")
     cd_.add_argument("--sort", choices=["score", "rate", "budget"], default="score",
                      help="score = rate x remaining budget x familiarity (default)")
     cd_.add_argument("--add", action="store_true",

@@ -163,6 +163,29 @@ def test_cli_sort_rate_puts_outlier_first(env, capsys):
     assert capsys.readouterr().out.splitlines()[0].endswith("Tiny Outlier")
 
 
+def test_cli_max_cpm_drops_implausible_rates(env, tmp_path, capsys):
+    from clipengine import cli
+
+    page = tmp_path / "weird.html"
+    page.write_text("\n".join([
+        "$1,000", "/1K", "Authority Army", "·", "2d", "Product",
+        "Carey James | Clipping Campaign", "Some blurb",
+        "Join Campaign", "$720", "/$1,000",
+        "0", "$2", "/1K", "Propaganda", "·", "15d", "Product",
+        "Pacinos UGC Clipping", "Blurb", "Join Campaign", "$41,370", "/$50,000",
+    ]))
+    rc = cli.main(["--config", env[0], "campaigns", "discover", "--file", str(page)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Carey James" not in captured.out          # implausible rate dropped
+    assert "Pacinos" in captured.out
+    assert "mis-parsed" in captured.err
+    # override keeps it
+    rc = cli.main(["--config", env[0], "campaigns", "discover", "--file", str(page),
+                   "--max-cpm", "2000"])
+    assert "Carey James" in capsys.readouterr().out
+
+
 def test_cli_min_cpm_filters_and_reports(env, capsys):
     assert _run(env, "--min-cpm", "0.9") == 0
     captured = capsys.readouterr()
