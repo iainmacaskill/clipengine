@@ -98,6 +98,14 @@ clipengine detect vod.mp4 --chat chat.jsonl
 clipengine process vod.mp4 --chat chat.jsonl --streamer somestreamer -o clips/ \
     --top 5 --queue-platform youtube --account mychannel
 
+# --campaign applies that campaign's render template: detection windows are
+# steered inside the campaign's duration bounds, the mandated credit is burned
+# in alongside the roster credit, every clip gets a ready-to-post caption with
+# the required hashtags/mentions, and the gate report lands in the manifest;
+# gate-failing clips are never queued. Compliance is baked in, not checked after
+clipengine process vod.mp4 --chat chat.jsonl --streamer somestreamer -o clips/ \
+    --campaign manual:neon-clips --queue-platform tiktok --account acct1
+
 # LIVE mode: watch a stream's chat, capture Twitch clips on hype spikes
 # (clip creation needs CLIPENGINE_TWITCH_USER_TOKEN with the clips:edit scope)
 clipengine live somestreamer -o live_clips/ --dry-run     # detect only, calibrate
@@ -161,6 +169,7 @@ clipengine/
   campaigns/      Whop campaign intelligence: read-only bounty discovery,
                   EV scoring, rules-text -> compliance checklist, launch alerts,
                   pre-export compliance gate (enforced by publish/queue),
+                  per-campaign render templates (compliance baked into renders),
                   submission tracker (pending -> approved -> paid + earnings)
   analytics.py    performance snapshots + reporting for published posts
   review.py       human review queue - pass-rate metric, approvals feed publishing

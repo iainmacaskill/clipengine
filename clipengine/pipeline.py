@@ -112,6 +112,7 @@ def process_vod(
     with_captions: bool = True,
     facecam: FacecamRegion | None = None,
     suggest=None,
+    campaign=None,
 ) -> list[dict]:
     """Whole-VOD batch: detect -> render top-N (credited) -> music screen/mute
     -> LLM hook/title/hashtags (when configured).
@@ -124,7 +125,15 @@ def process_vod(
     ``suggest`` is a callable(transcript_text, streamer) -> hooks.Suggestion|None;
     when None it defaults to Claude via package.hooks if an API key is present.
     Suggestions need a transcript, so they only run when captions are on.
+
+    ``campaign`` (a campaigns.models.Campaign) applies that campaign's render
+    template: the detection window is steered inside the campaign's duration
+    bounds, the mandated credit is burned alongside the roster credit, every
+    clip gets a ready-to-post caption carrying the required hashtags/mentions,
+    and the compliance gate report is recorded per clip in the manifest.
     """
+    import copy
+
     from .package import hooks
     from .package.music import check as music_check, mute_segments
     from .roster import Roster
@@ -135,6 +144,17 @@ def process_vod(
     with Roster(cfg.roster_db) as roster:
         entry = roster.require(streamer)
     credit = credit_text_for(streamer, entry.credit)
+
+    template = None
+    if campaign is not None:
+        from .campaigns.template import effective_target, merge_credit, template_for
+
+        template = template_for(campaign)
+        target = effective_target(template, cfg.detect.target_duration)
+        if target != cfg.detect.target_duration:
+            cfg = copy.deepcopy(cfg)
+            cfg.detect.target_duration = target
+        credit = merge_credit(credit, template)
 
     os.makedirs(out_dir, exist_ok=True)
     candidates = detect_candidates(video_path, chat_path, cfg)[: top_n or cfg.detect.top_n]
@@ -191,6 +211,27 @@ def process_vod(
                 ]
             item["path"] = out_path
             item["status"] = "rendered"
+            if template is not None:
+                from .campaigns.gate import ClipFacts, preflight
+                from .campaigns.template import build_caption
+
+                caption = build_caption(item.get("suggested_title", ""), template)
+                report = preflight(
+                    ClipFacts(
+                        duration_s=cand.duration,
+                        caption=caption,
+                        credit_text=credit,
+                    ),
+                    template.checklist,
+                    campaign,
+                )
+                item["campaign"] = campaign.id
+                item["caption"] = caption
+                item["gate"] = {
+                    "passed": report.passed,
+                    "failures": [r.detail for r in report.failures],
+                    "manual": [r.detail for r in report.manual],
+                }
         except Exception as e:  # noqa: BLE001 - isolate per-clip failures
             item["status"] = "failed"
             item["error"] = str(e)[:300]

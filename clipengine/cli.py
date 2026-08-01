@@ -68,6 +68,30 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
             f"(score {found.score:.2f})",
             file=sys.stderr,
         )
+    if args.campaign:
+        from .campaigns.store import CampaignStore
+        from .campaigns.template import merge_credit, template_for
+
+        with CampaignStore(cfg.campaigns.campaigns_db) as store:
+            campaign_rec = store.get(args.campaign)
+        if campaign_rec is None:
+            print(f"unknown campaign: {args.campaign}", file=sys.stderr)
+            return 1
+        template = template_for(campaign_rec)
+        credit = merge_credit(credit or "", template) or None
+        duration = args.end - args.start
+        for bound, ok in (
+            (template.min_duration_s, template.min_duration_s is None
+             or duration >= template.min_duration_s),
+            (template.max_duration_s, template.max_duration_s is None
+             or duration <= template.max_duration_s),
+        ):
+            if not ok:
+                print(
+                    f"warning: {duration:g}s is outside the campaign's duration "
+                    f"bound ({bound:g}s) - the compliance gate will refuse this clip",
+                    file=sys.stderr,
+                )
     candidate = ClipCandidate(start=args.start, end=args.end, score=0.0)
     out = pipeline.render_candidate(
         args.video,
@@ -498,6 +522,21 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
         x, y, w, h = (int(v) for v in args.facecam.split(","))
         facecam = FacecamRegion(x, y, w, h)
 
+    campaign = None
+    if args.campaign:
+        from .campaigns.store import CampaignStore
+
+        with CampaignStore(cfg.campaigns.campaigns_db) as store:
+            campaign = store.get(args.campaign)
+        if campaign is None:
+            print(f"unknown campaign: {args.campaign}", file=sys.stderr)
+            return 1
+        if not campaign.open:
+            print(
+                f"warning: campaign is {campaign.status} - clips may not pay",
+                file=sys.stderr,
+            )
+
     manifest = pipeline.process_vod(
         args.video,
         args.chat,
@@ -507,6 +546,7 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
         top_n=args.top,
         with_captions=not args.no_captions,
         facecam=facecam,
+        campaign=campaign,
     )
     rendered = [m for m in manifest if m["status"] == "rendered"]
     for m in manifest:
@@ -516,8 +556,14 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
                 if m.get("muted_segments")
                 else ""
             )
+            gate_note = ""
+            if "gate" in m:
+                gate_note = (
+                    "  gate: PASS" if m["gate"]["passed"]
+                    else "  gate: FAIL (" + "; ".join(m["gate"]["failures"]) + ")"
+                )
             print(f"#{m['index']} {m['start']:8.1f}-{m['end']:8.1f}s "
-                  f"score={m['score']:.2f}  {m['path']}{mute_note}")
+                  f"score={m['score']:.2f}  {m['path']}{mute_note}{gate_note}")
         else:
             print(f"#{m['index']} {m['start']:8.1f}-{m['end']:8.1f}s FAILED: {m['error']}",
                   file=sys.stderr)
@@ -531,8 +577,17 @@ def _cmd_process(args: argparse.Namespace, cfg: config.Config) -> int:
             return 1
         with Queue(cfg.schedule.queue_db) as queue:
             for m in rendered:
-                title = m.get("suggested_title") or args.title_template.format(
-                    streamer=m["streamer"], i=m["index"], start=int(m["start"])
+                if m.get("gate") and not m["gate"]["passed"]:
+                    print(
+                        f"not queued #{m['index']}: campaign gate failed "
+                        f"({'; '.join(m['gate']['failures'])})",
+                        file=sys.stderr,
+                    )
+                    continue
+                title = m.get("caption") or m.get("suggested_title") or (
+                    args.title_template.format(
+                        streamer=m["streamer"], i=m["index"], start=int(m["start"])
+                    )
                 )
                 post = queue.add(
                     args.queue_platform, args.account, m["path"], title, _rules(cfg)
@@ -1053,6 +1108,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-credit", action="store_true", help="private test renders only")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--no-captions", action="store_true")
+    p.add_argument("--campaign",
+                   help="apply this campaign's template: mandated credit, duration bounds")
     p.set_defaults(func=_cmd_render)
 
     p = sub.add_parser("facecam", help="auto-detect the facecam region of a video")
@@ -1156,6 +1213,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--account", help="publish account (required with --queue-platform)")
     p.add_argument("--title-template", default="{streamer} clip {i}",
                    help="queue titles; placeholders: {streamer} {i} {start}")
+    p.add_argument("--campaign",
+                   help="apply this campaign's render template: duration bounds steer "
+                        "detection, mandated credit is burned in, captions carry the "
+                        "required tags, and the gate report lands in the manifest")
     p.set_defaults(func=_cmd_process)
 
     p = sub.add_parser("review", help="human review queue for rendered clips")
