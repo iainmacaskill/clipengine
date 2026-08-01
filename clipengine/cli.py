@@ -863,6 +863,14 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                 with open(args.dump, "w", encoding="utf-8") as f:
                     f.write(page)
                 print(f"page saved -> {args.dump}", file=sys.stderr)
+            if args.debug:
+                contexts = discover.card_contexts(page)
+                for n, ctx in enumerate(contexts[:6], start=1):
+                    print(f"----- card {n} context -----")
+                    for ln in ctx:
+                        print(f"  {ln[:110]}")
+                print(f"({len(contexts)} rate lines total)")
+                return 0
             found = discover.parse_discover(page)
             if not found:
                 print(
@@ -1421,6 +1429,8 @@ def main(argv: list[str] | None = None) -> int:
                      help="render in headless Chromium first (the feed is client-"
                           "rendered; needs clipengine[browser] + playwright install chromium)")
     cd_.add_argument("--dump", help="also save the fetched/rendered page HTML to this file")
+    cd_.add_argument("--debug", action="store_true",
+                     help="print the raw text lines around each campaign card (parser tuning)")
     cd_.add_argument("--top", type=int, help="show only the top N")
     cd_.add_argument("--min-cpm", type=float, help="drop campaigns paying less per 1k views")
     cd_.add_argument("--sort", choices=["score", "rate", "budget"], default="score",

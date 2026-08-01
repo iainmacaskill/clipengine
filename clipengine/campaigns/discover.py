@@ -293,11 +293,34 @@ def _nearby_url(window: str, pos: int) -> str:
     return path if path.startswith("http") else f"https://whop.com/{path.lstrip('/')}"
 
 
-def _from_visible_text(html: str) -> list[Discovered]:
-    """Strip markup, then read card text around each '$X / 1K' occurrence."""
+# card chip labels that sit between the real title and the rate - never titles
+_CHIP_LABELS = {
+    "product", "technology", "personal brand", "music", "gaming", "health",
+    "entertainment", "education", "finance", "sports", "software", "apps",
+    "crypto", "fitness", "business", "lifestyle", "other", "clipping",
+    "ugc", "faceless", "open", "active", "new",
+}
+
+
+def _visible_lines(html: str) -> list[str]:
     text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", "\n", text)
-    lines = [html_mod.unescape(ln.strip()) for ln in text.splitlines() if ln.strip()]
+    return [html_mod.unescape(ln.strip()) for ln in text.splitlines() if ln.strip()]
+
+
+def card_contexts(html: str, before: int = 8, after: int = 9) -> list[list[str]]:
+    """Raw line windows around each rate - the --debug view for parser tuning."""
+    lines = _visible_lines(html)
+    return [
+        lines[max(0, i - before): i + after]
+        for i, ln in enumerate(lines)
+        if _RATE_RE.search(ln)
+    ]
+
+
+def _from_visible_text(html: str) -> list[Discovered]:
+    """Strip markup, then read card text around each '$X / 1K' occurrence."""
+    lines = _visible_lines(html)
     results = []
     for i, line in enumerate(lines):
         rate_m = _RATE_RE.search(line)
@@ -308,7 +331,8 @@ def _from_visible_text(html: str) -> list[Discovered]:
              if 3 <= len(ln) <= 90 and not any(c in ln for c in "$%")
              and not _RATE_RE.search(ln)
              and ln.lower() not in _PLATFORMS
-             and not ln.lower().startswith(("clipping", "ugc", "faceless", "view "))),
+             and ln.lower().strip() not in _CHIP_LABELS
+             and not ln.lower().startswith(("clipping campaign", "ugc campaign", "view "))),
             "",
         )
         if not title:

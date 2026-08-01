@@ -13,7 +13,7 @@ RSC_PAGE = """<html><body><div id="app"></div>
 ]}"])</script></body></html>"""
 
 TEXT_PAGE = """<html><body>
-<div class="card"><h3>Pacinos Hair</h3><span>Clipping</span>
+<div class="card"><h3>Pacinos Hair</h3><span>Product</span><span>Clipping</span>
 <span>$1 / 1K</span><span>$12,500 of $50,000 paid</span>
 <span>TikTok</span><span>Instagram</span></div>
 <div class="card"><h3>Boxabl Homes</h3><span>UGC</span>
@@ -46,6 +46,24 @@ def test_parses_visible_text_cards():
     assert boxabl.rate == 0.5
     assert boxabl.budget_total == 85000  # K suffix handled
     assert boxabl.platforms == ["youtube", "x"]  # bare X chip counts, substrings don't
+
+
+def test_category_chips_are_not_titles():
+    """Live-feed defect: 'Product'/'Technology' chips sat between the real
+    title and the rate and were being picked as titles."""
+    page = """<div><h3>Daimon X Syndicate</h3><span>Technology</span>
+    <span>Clipping</span><span>$4 / 1K</span><span>$1K of $9K paid</span></div>"""
+    (d,) = parse_discover(page)
+    assert d.title == "Daimon X Syndicate"
+
+
+def test_card_contexts_debug_view():
+    from clipengine.campaigns.discover import card_contexts
+
+    contexts = card_contexts(TEXT_PAGE)
+    assert len(contexts) == 3
+    assert any("Pacinos Hair" in ln for ln in contexts[0])
+    assert any("$1 / 1K" in ln for ln in contexts[0])
 
 
 def test_unparseable_page_degrades_to_empty():
