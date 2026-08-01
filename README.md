@@ -52,7 +52,16 @@ clipengine campaigns sync
 clipengine campaigns list --status open --top 10
 clipengine campaigns show bnty_xxx            # score breakdown, rules, budget history
 
-# CPM-per-views campaigns have no public API - key them in manually
+# CPM-per-views campaigns have no public API. Automated option: parse the
+# public discover feed (read-only), ranked by best rewards - rate x remaining
+# budget x familiarity, with nearly-exhausted pools sunk. If the CDN refuses
+# the fetch, save the page from your browser and use --file
+clipengine campaigns discover --top 10 --min-cpm 0.75 --add
+clipengine campaigns discover --file saved_page.html --sort rate
+# the feed has no rules text - attach each campaign's brief before producing
+clipengine campaigns rules disc:some-campaign --attach brief.txt
+
+# or key campaigns in manually
 clipengine campaigns add --title "Neon clips" --cpm 2 --budget 5000 \
     --platforms tiktok,youtube --rules-file campaign_brief.txt
 clipengine campaigns rules --file campaign_brief.txt   # preview the parsed checklist

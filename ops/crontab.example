@@ -16,3 +16,7 @@
 
 # optional: publish queued clips as their slots come due
 #*/15 * * * * /opt/clipengine/ops/clipengine-cron.sh queue-run queue run
+
+# optional: discover-feed sweep with launch alerts (read-only page parse;
+# works from residential IPs - the CDN may refuse datacenter fetches)
+#0 * * * *    /opt/clipengine/ops/clipengine-cron.sh discover campaigns discover --min-cpm 0.75 --add

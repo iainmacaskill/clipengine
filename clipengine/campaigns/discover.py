@@ -1,0 +1,252 @@
+"""Read-only Content Rewards discover-feed parser.
+
+The flagship CPM campaigns are app/web-only (confirmed against production:
+the REST API's /bounties is business-scoped), so automated discovery means
+parsing the public discover page — squarely inside the brief's "read-only
+campaign discovery" carve-out, and built defensively as the brief demands:
+multiple extraction strategies, and graceful degradation to ``campaigns
+add`` when the page structure changes.
+
+Two input paths:
+- live fetch (one GET with a browser user agent; the CDN may still refuse
+  datacenter clients), or
+- a page saved from the operator's browser (``--file``), which always works.
+
+Strategies, tried in order:
+1. Embedded JSON: campaign-like objects in script payloads (Next.js/RSC
+   chunks), matched by reward-rate-ish keys with aliases.
+2. Visible text: strip markup, find "$X / 1K"-style rates, then scan the
+   surrounding lines for title, budget ("$X of $Y"), and platforms.
+"""
+from __future__ import annotations
+
+import html as html_mod
+import json
+import re
+from dataclasses import dataclass, field
+
+import httpx
+
+from .models import Campaign
+
+DISCOVER_URL = "https://whop.com/discover/content-rewards/"
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
+_PLATFORMS = ("tiktok", "youtube", "instagram", "facebook")
+
+
+def _platforms_in(chunks: list[str]) -> list[str]:
+    """Canonical platform names mentioned in the given text chunks.
+
+    "x" needs care: as a substring it matches everything, so it only counts
+    as Twitter/X when it stands alone (a chip label) or "twitter" appears.
+    """
+    found = []
+    for p in _PLATFORMS:
+        if any(p in c.lower() for c in chunks):
+            found.append(p)
+    if any("twitter" in c.lower() or c.strip().lower() in ("x", '"x"') for c in chunks):
+        found.append("x")
+    return found
+
+# "$1.50 / 1K", "$1 per 1k views", "$0.50/1,000 views"
+_RATE_RE = re.compile(
+    r"\$\s*([\d][\d,]*\.?\d*)\s*(?:/|per)\s*1[,.]?0?0?0?\s*[Kk]?", re.I
+)
+# "$30,000 of $120,000", "$30K of $120K paid"
+_OF_RE = re.compile(
+    r"\$\s*([\d][\d,]*\.?\d*)\s*([KkMm])?\s*of\s*\$\s*([\d][\d,]*\.?\d*)\s*([KkMm])?"
+)
+_MONEY_KEY = r'"(?P<key>{})"\s*:\s*(?P<val>[\d.]+)'
+_RATE_KEYS = ("rewardRate", "reward_rate", "cpm", "amountPerThousand",
+              "rewardPerThousand", "costPerThousandViews")
+_BUDGET_KEYS = ("totalBudget", "total_budget", "budgetAmount", "budget_amount", "budget")
+_PAID_KEYS = ("paidOut", "paid_out", "totalPaid", "total_paid", "spent", "amountPaid")
+_TITLE_RE = re.compile(r'"(?:title|name|campaignName)"\s*:\s*"((?:[^"\\]|\\.){3,120})"')
+
+
+def _money(num: str, suffix: str | None) -> float:
+    value = float(num.replace(",", ""))
+    return value * {"k": 1e3, "m": 1e6}.get((suffix or "").lower(), 1.0)
+
+
+@dataclass
+class Discovered:
+    title: str
+    rate: float                    # $ per 1,000 verified views
+    budget_total: float = 0.0
+    budget_remaining: float = 0.0  # total - paid when both known, else total
+    platforms: list[str] = field(default_factory=list)
+    url: str = ""
+
+    def to_campaign(self) -> Campaign:
+        slug = re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")[:48]
+        return Campaign(
+            id=f"disc:{slug}",
+            source="manual",  # provenance: parsed from the web feed, not the API
+            title=self.title,
+            status="open",
+            reward_model="cpm",
+            reward_amount=self.rate,
+            budget_total=self.budget_total,
+            budget_remaining=self.budget_remaining or self.budget_total,
+            platforms=self.platforms,
+            url=self.url,
+        )
+
+
+def fetch_discover(url: str = DISCOVER_URL, client: httpx.Client | None = None) -> str:
+    """One read-only GET with a browser UA. Raises httpx errors on refusal."""
+    client = client or httpx.Client(timeout=30.0, follow_redirects=True)
+    resp = client.get(url, headers={"User-Agent": BROWSER_UA,
+                                    "Accept": "text/html,application/xhtml+xml"})
+    resp.raise_for_status()
+    return resp.text
+
+
+def parse_discover(html: str) -> list[Discovered]:
+    found = _from_embedded_json(html)
+    if not found:
+        found = _from_visible_text(html)
+    return _dedupe(found)
+
+
+def _nearest(window: str, pattern: re.Pattern, pos: int) -> re.Match | None:
+    """The match whose position is closest to pos - adjacent campaign objects
+    share extraction windows, so first-match grabs the neighbour's fields."""
+    matches = list(pattern.finditer(window))
+    return min(matches, key=lambda m: abs(m.start() - pos)) if matches else None
+
+
+def _object_bounds(s: str, pos: int) -> tuple[int, int] | None:
+    """Bounds of the JSON object enclosing pos, by brace matching - adjacent
+    campaign objects are close together, so character windows bleed."""
+    depth = 0
+    start = -1
+    for i in range(pos, -1, -1):
+        c = s[i]
+        if c == "}":
+            depth += 1
+        elif c == "{":
+            if depth == 0:
+                start = i
+                break
+            depth -= 1
+    if start < 0:
+        return None
+    depth = 0
+    for j in range(start, min(len(s), start + 6000)):
+        c = s[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return start, j + 1
+    return None
+
+
+def _from_embedded_json(html: str) -> list[Discovered]:
+    """Campaign-like objects in script payloads, located by reward-rate keys."""
+    # RSC chunks carry the JSON with escaped quotes (\"key\") - unescape once
+    # up front so the locator and sub-searches see plain JSON either way
+    html = html.replace('\\"', '"')
+    rate_re = re.compile(_MONEY_KEY.format("|".join(_RATE_KEYS)))
+    results = []
+    for m in rate_re.finditer(html):
+        bounds = _object_bounds(html, m.start())
+        if bounds:
+            window = html[bounds[0]: bounds[1]]
+            pos = m.start() - bounds[0]
+        else:
+            start = max(0, m.start() - 800)
+            window = html[start: m.end() + 800]
+            pos = m.start() - start
+        title_m = _nearest(window, _TITLE_RE, pos)
+        if not title_m:
+            continue
+        budget = _nearest_key(window, _BUDGET_KEYS, pos)
+        paid = _nearest_key(window, _PAID_KEYS, pos)
+        remaining = max(0.0, budget - paid) if budget else 0.0
+        title = title_m.group(1)
+        try:
+            title = title.encode().decode("unicode_escape")
+        except UnicodeDecodeError:
+            pass
+        results.append(Discovered(
+            title=title,
+            rate=float(m.group("val")),
+            budget_total=budget,
+            budget_remaining=remaining,
+            platforms=_platforms_in(re.findall(r'"([a-zA-Z]{1,12})"', window)),
+            url=_nearby_url(window, pos),
+        ))
+    return results
+
+
+def _nearest_key(window: str, keys: tuple[str, ...], pos: int) -> float:
+    m = _nearest(window, re.compile(_MONEY_KEY.format("|".join(keys))), pos)
+    return float(m.group("val")) if m else 0.0
+
+
+def _nearby_url(window: str, pos: int) -> str:
+    m = _nearest(
+        window,
+        re.compile(r'"(?:route|href|url|slug)"\s*:\s*"(/?[a-z0-9\-/]{3,80})"'),
+        pos,
+    )
+    if not m:
+        return ""
+    path = m.group(1)
+    return path if path.startswith("http") else f"https://whop.com/{path.lstrip('/')}"
+
+
+def _from_visible_text(html: str) -> list[Discovered]:
+    """Strip markup, then read card text around each '$X / 1K' occurrence."""
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", "\n", text)
+    lines = [html_mod.unescape(ln.strip()) for ln in text.splitlines() if ln.strip()]
+    results = []
+    for i, line in enumerate(lines):
+        rate_m = _RATE_RE.search(line)
+        if not rate_m:
+            continue
+        title = next(
+            (ln for ln in reversed(lines[max(0, i - 5): i])
+             if 3 <= len(ln) <= 90 and not any(c in ln for c in "$%")
+             and not _RATE_RE.search(ln)
+             and ln.lower() not in _PLATFORMS
+             and not ln.lower().startswith(("clipping", "ugc", "faceless", "view "))),
+            "",
+        )
+        if not title:
+            continue
+        # a card's own budget/platform chips follow its rate line; search
+        # forward first so the previous card's lines can't be picked up
+        card_lines = lines[i: i + 5] + lines[max(0, i - 2): i]
+        budget_total = remaining = 0.0
+        for ln in card_lines:
+            of_m = _OF_RE.search(ln)
+            if of_m:
+                paid = _money(of_m.group(1), of_m.group(2))
+                budget_total = _money(of_m.group(3), of_m.group(4))
+                remaining = max(0.0, budget_total - paid)
+                break
+        results.append(Discovered(
+            title=title,
+            rate=float(rate_m.group(1).replace(",", "")),
+            budget_total=budget_total,
+            budget_remaining=remaining,
+            platforms=_platforms_in(card_lines),
+        ))
+    return results
+
+
+def _dedupe(items: list[Discovered]) -> list[Discovered]:
+    seen: dict[tuple, Discovered] = {}
+    for item in items:
+        seen.setdefault((item.title.lower(), item.rate), item)
+    return list(seen.values())

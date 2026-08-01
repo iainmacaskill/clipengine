@@ -834,6 +834,68 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
         return 0 if ok else 1
 
     with CampaignStore(cfg.campaigns.campaigns_db) as store:
+        if args.campaigns_action == "discover":
+            import httpx as _httpx
+
+            from .campaigns import alerts, discover
+
+            if args.file:
+                with open(args.file, encoding="utf-8", errors="replace") as f:
+                    page = f.read()
+            else:
+                try:
+                    page = discover.fetch_discover(args.url)
+                except _httpx.HTTPError as e:
+                    print(
+                        f"fetch failed ({e}). The discover page sits behind a "
+                        "bot-checking CDN - save it from your browser (File > Save "
+                        "Page As) and re-run with --file page.html",
+                        file=sys.stderr,
+                    )
+                    return 2
+            found = discover.parse_discover(page)
+            if not found:
+                print(
+                    "no campaign cards parsed - the page structure may have "
+                    "changed. Save the page from your browser and share it so the "
+                    "parser can be updated; meanwhile 'campaigns add' still works.",
+                    file=sys.stderr,
+                )
+                return 1
+            candidates = [d.to_campaign() for d in found
+                          if d.rate >= (args.min_cpm or 0.0)]
+            scored = rank(candidates, cfg.campaigns.familiarity)
+            if args.sort == "rate":
+                scored.sort(key=lambda s: s.campaign.reward_amount, reverse=True)
+            elif args.sort == "budget":
+                scored.sort(key=lambda s: s.campaign.budget_remaining, reverse=True)
+            shown = scored[: args.top] if args.top else scored
+            for s in shown:
+                c = s.campaign
+                plats = ",".join(c.platforms) or "-"
+                print(
+                    f"[{s.score:6.1f}] {c.reward_amount:>5g}/1k  "
+                    f"{c.budget_remaining:>10g} left  {plats:<28} {c.title[:44]}"
+                )
+            dropped = len(found) - len(candidates)
+            if dropped:
+                print(f"({dropped} below --min-cpm {args.min_cpm:g})", file=sys.stderr)
+            if args.add:
+                new = store.upsert([s.campaign for s in shown])
+                print(f"stored {len(shown)} campaign(s), {len(new)} new")
+                alertable = [
+                    s for s in rank(new, cfg.campaigns.familiarity)
+                    if s.score >= cfg.campaigns.alert_min_score
+                ]
+                if alertable and cfg.campaigns.alert_webhook:
+                    ok = alerts.notify(cfg.campaigns.alert_webhook, alertable)
+                    print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)})")
+                print(
+                    "note: rules text is not on the discover feed - open each "
+                    "campaign page and attach its brief before producing: "
+                    "clipengine campaigns rules disc:ID --attach brief.txt",
+                )
+            return 0
         if args.campaigns_action == "sync":
             from .campaigns import alerts
             from .campaigns.whop import WhopClient, WhopError
@@ -938,8 +1000,14 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
             if c is None:
                 print(f"unknown campaign: {args.id}", file=sys.stderr)
                 return 1
-            if not c.rules_text:
-                print("no rules text stored - re-sync without --no-rules or add --rules")
+            if args.attach:
+                with open(args.attach) as f:
+                    c.rules_text = f.read()
+                store.upsert([c])
+                print(f"rules attached to {c.id}:")
+            elif not c.rules_text:
+                print("no rules text stored - attach the campaign brief with "
+                      "'campaigns rules ID --attach brief.txt'")
                 return 1
             _print_checklist(parse_rules(c.rules_text))
     return 0
@@ -1330,6 +1398,20 @@ def main(argv: list[str] | None = None) -> int:
     cr = csub.add_parser("rules", help="parsed rules checklist for a campaign or a text file")
     cr.add_argument("id", nargs="?", help="stored campaign id")
     cr.add_argument("--file", help="parse this file instead of a stored campaign")
+    cr.add_argument("--attach", help="store this file's text as the campaign's rules")
+    cd_ = csub.add_parser(
+        "discover",
+        help="parse the public Content Rewards discover feed, rank by best rewards "
+             "(read-only; the CPM campaigns have no API)",
+    )
+    cd_.add_argument("--url", default="https://whop.com/discover/content-rewards/")
+    cd_.add_argument("--file", help="parse a browser-saved copy of the page instead of fetching")
+    cd_.add_argument("--top", type=int, help="show only the top N")
+    cd_.add_argument("--min-cpm", type=float, help="drop campaigns paying less per 1k views")
+    cd_.add_argument("--sort", choices=["score", "rate", "budget"], default="score",
+                     help="score = rate x remaining budget x familiarity (default)")
+    cd_.add_argument("--add", action="store_true",
+                     help="store the shown campaigns (ids disc:...) + launch alerts")
     cc = csub.add_parser(
         "check",
         help="compliance gate: pre-flight a clip + caption against a campaign's rules",

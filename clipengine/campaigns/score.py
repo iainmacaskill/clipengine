@@ -59,7 +59,11 @@ def score_campaign(
     # the original /bounties surface doesn't expose a per-submission reward;
     # unknown rate scores neutral (1.0) so budget/familiarity/rules still rank
     rate = campaign.reward_amount if campaign.reward_amount > 0 else 1.0
-    budget = math.log1p(max(0.0, campaign.budget_remaining))
+    remaining = max(0.0, campaign.budget_remaining)
+    # log1p gives diminishing returns on big pools; the saturation term sinks
+    # nearly-exhausted ones - high-rate outliers on dying budgets are the
+    # known trap (work delivered after the pool empties is unpaid)
+    budget = math.log1p(remaining) * (remaining / (remaining + 1000.0))
     parts = {
         "rate": rate,
         "budget": round(budget, 3),
