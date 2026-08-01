@@ -31,7 +31,7 @@ def test_fit_graph_credit_and_cta():
 
 def test_fit_graph_escapes_drawtext():
     g = vertical_fit_graph(_source(), EditConfig(), cta_text="100%: don't")
-    assert "100\\%" in g and "don\\'t" in g
+    assert "100\\%" in g and "don'\\''t" in g
 
 
 # -- pipeline --------------------------------------------------------------
@@ -119,6 +119,80 @@ def test_repurpose_captions_burned_when_speech(cfg, fakes, monkeypatch, tmp_path
     monkeypatch.setattr(pipeline.edit, "burn_subtitles", fake_burn)
     pipeline.repurpose_asset("asset.mp4", str(tmp_path / "out.mp4"), cfg)
     assert "ass" in burned
+
+
+# -- snap-to-speech --------------------------------------------------------
+
+
+def _speech():
+    """Sentences at 2-6s, 8-14s, 20-27s, 30-38s with silence between."""
+    return Transcript(segments=[
+        TranscriptSegment(start=2.0, end=6.0, text="First sentence.", words=[]),
+        TranscriptSegment(start=8.0, end=14.0, text="Second, longer sentence.", words=[]),
+        TranscriptSegment(start=20.0, end=27.0, text="Third sentence.", words=[]),
+        TranscriptSegment(start=30.0, end=38.0, text="Fourth sentence.", words=[]),
+    ])
+
+
+def test_snap_start_backs_up_to_sentence_start():
+    start, end = pipeline.snap_to_speech(_speech(), 10.0, 27.0)
+    assert start == pytest.approx(7.8)   # 8.0 - pad: sentence two from the top
+    assert end == pytest.approx(27.2)    # already a boundary + pad
+
+
+def test_snap_start_jumps_forward_when_backup_too_far():
+    # 13.0 is 5s into sentence two (> max_shift 4) -> next sentence start
+    start, _end = pipeline.snap_to_speech(_speech(), 13.0, 27.0)
+    assert start == pytest.approx(19.8)  # 20.0 - pad
+
+
+def test_snap_end_extends_to_finish_sentence():
+    _start, end = pipeline.snap_to_speech(_speech(), 2.0, 25.0)
+    assert end == pytest.approx(27.2)    # sentence three allowed to finish
+
+
+def test_snap_end_retreats_when_extension_too_far():
+    # 31.0 is 7s before sentence four ends (> max_shift) -> cut before it starts
+    _start, end = pipeline.snap_to_speech(_speech(), 2.0, 31.0)
+    assert end == pytest.approx(30.2)    # 30.0 + pad
+
+
+def test_snap_leaves_silence_boundaries_alone():
+    start, end = pipeline.snap_to_speech(_speech(), 7.0, 28.5)
+    assert start == pytest.approx(6.8) and end == pytest.approx(28.7)  # pad only
+
+
+def test_source_transcript_uses_cache(cfg, tmp_path, monkeypatch):
+    import json
+
+    src = tmp_path / "master.mov"
+    src.write_text("video")
+    cache = tmp_path / "master.mov.transcript.json"
+    cache.write_text(json.dumps({"segments": [
+        {"start": 1.0, "end": 3.0, "text": "cached", "words": []}
+    ]}))
+    monkeypatch.setattr(
+        pipeline.transcribe, "transcribe",
+        lambda wav: (_ for _ in ()).throw(AssertionError("must not re-transcribe")),
+    )
+    t = pipeline.source_transcript(str(src), cfg)
+    assert t.segments[0].text == "cached"
+
+
+def test_cli_snap_adjusts_window(cfg, fakes, tmp_path, monkeypatch, capsys):
+    from clipengine import cli
+
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text(f'work_dir = "{cfg.work_dir}"\n')
+    monkeypatch.setattr(pipeline, "source_transcript", lambda v, c: _speech())
+    rc = cli.main([
+        "--config", str(cfg_file), "repurpose", "asset.mp4",
+        "-o", str(tmp_path / "out.mp4"), "--no-captions", "--snap",
+        "--start", "10", "--end", "25",
+    ])
+    assert rc == 0
+    assert "snapped window 10-25s -> 7.8-27.2s" in capsys.readouterr().err
+    assert fakes["trim"] == (7.8, pytest.approx(19.4))  # snapped start/duration
 
 
 # -- CLI with campaign gate ------------------------------------------------

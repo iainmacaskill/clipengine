@@ -58,11 +58,18 @@ def trim(src: str, dst: str, start: float, duration: float, cfg: EditConfig) -> 
 
 
 def escape_drawtext(text: str) -> str:
-    """Escape a string for ffmpeg drawtext (backslash, quote, colon, percent)."""
+    """Escape a string for ffmpeg drawtext, assuming the call site wraps the
+    result in single quotes (text='...').
+
+    Backslash/colon/percent are drawtext-level escapes; an apostrophe needs
+    the quote-break form ('\\'') because backslash-escaping does not work
+    inside a quoted filter argument - a hook like "you're" aborts the render
+    otherwise (found by the Fightland batch proof-run).
+    """
     out = text.replace("\\", "\\\\")
-    for ch in ("'", ":", "%"):
+    for ch in (":", "%"):
         out = out.replace(ch, "\\" + ch)
-    return out
+    return out.replace("'", "'\\''")
 
 
 def vertical_graph(

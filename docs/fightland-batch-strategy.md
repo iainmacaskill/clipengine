@@ -32,10 +32,21 @@ door x archetype earns views and engagement. That result seeds the next batch
 (double down on the winning door/archetype) — the M4 optimisation loop running
 on real campaign data.
 
+## Sentence-snapped windows
+
+The percentage in-points are blind cuts, so the batch runs with `--snap`:
+each source is Whisper-transcribed once (cached beside the file) and every
+window snaps to sentence boundaries - the start backs up to the beginning of
+the sentence it lands in (or jumps to the next one when that's closer) and
+the end extends to let the last sentence finish. No variant can open or
+close mid-sentence, which is both a watchability rule and this campaign's
+context-integrity rule. Requires `pip install "clipengine[asr]"`; disable
+with `SNAP=""` if needed.
+
 ## Operating rules (from the campaign brief)
 
-- Watch every variant before posting: a window that opens mid-sentence has
-  broken context - shift `--start` a couple of seconds and re-render.
+- Still watch every variant before posting: snapping guarantees sentence
+  boundaries, not scene sense - the human eye is the last gate.
 - Audio untouched; only windows, on-screen text, and captions vary.
 - Spread posts: 1-2 per day per page, TikTok + Instagram (IG captions tag
   only @STARZ). Same video never more than 5 times across pages.

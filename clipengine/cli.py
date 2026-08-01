@@ -121,6 +121,33 @@ def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
             return 1
         caption = build_caption(caption, template_for(campaign_rec))
 
+    if args.snap and (args.start is not None or args.end is not None):
+        from .edit.ffmpeg import probe
+
+        try:
+            transcript = pipeline.source_transcript(args.video, cfg)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        except Exception as e:  # model download / network failures
+            print(
+                f"--snap failed to transcribe ({type(e).__name__}: {str(e)[:120]}). "
+                "The Whisper model downloads on first use - check network, or "
+                "rerun without --snap.",
+                file=sys.stderr,
+            )
+            return 2
+        start0 = args.start if args.start is not None else 0.0
+        end0 = args.end if args.end is not None else probe(args.video).duration
+        snapped = pipeline.snap_to_speech(transcript, start0, end0)
+        if snapped != (start0, end0):
+            print(
+                f"snapped window {start0:g}-{end0:g}s -> "
+                f"{snapped[0]:g}-{snapped[1]:g}s (sentence boundaries)",
+                file=sys.stderr,
+            )
+        args.start, args.end = snapped
+
     out = pipeline.repurpose_asset(
         args.video,
         args.output,
@@ -1265,6 +1292,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", type=float, help="trim start (seconds)")
     p.add_argument("--end", type=float, help="trim end (seconds)")
     p.add_argument("--no-captions", action="store_true")
+    p.add_argument("--snap", action="store_true",
+                   help="snap --start/--end to sentence boundaries via Whisper so the "
+                        "clip never opens or closes mid-sentence (needs clipengine[asr]; "
+                        "the source transcript is cached beside the file)")
     p.add_argument("--campaign", help="build a compliant caption + run the gate after rendering")
     p.add_argument("--caption", help="caption base text (campaign tokens are appended)")
     p.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])

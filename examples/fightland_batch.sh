@@ -13,6 +13,9 @@ SRC1="${SRC1:-fightland/ftl1_3634005_035_pblt.mov}"
 SRC2="${SRC2:-fightland/ftl1_3634032_035_pblt.mov}"
 OUT="${OUT:-fightland/batch01}"
 CAMPAIGN="${CAMPAIGN:-disc:fightland}"
+# --snap aligns every window to sentence boundaries via Whisper (needs
+# clipengine[asr]); set SNAP="" to disable
+SNAP="${SNAP---snap}"
 mkdir -p "$OUT"
 manifest="$OUT/posting-plan.txt"
 : > "$manifest"
@@ -26,7 +29,8 @@ render() { # src start end hook caption outfile
         return 0
     fi
     echo "== $outfile  [${start}s-${end}s]  hook: $hook"
-    clipengine repurpose "$src" -o "$OUT/$outfile" --no-captions \
+    # shellcheck disable=SC2086
+    clipengine repurpose "$src" -o "$OUT/$outfile" --no-captions $SNAP \
         --campaign "$CAMPAIGN" --platform tiktok \
         --start "$start" --end "$end" \
         --hook "$hook" --caption "$caption"

@@ -102,6 +102,63 @@ def render_candidate(
     return edit.burn_subtitles(vert, out_path, ass, cfg.edit)
 
 
+def snap_to_speech(
+    transcript,
+    start: float,
+    end: float,
+    max_shift: float = 4.0,
+    pad: float = 0.2,
+) -> tuple[float, float]:
+    """Snap a cut window to sentence boundaries so it never opens or closes
+    mid-sentence.
+
+    Start: if it lands inside a spoken segment, pull it back to that
+    sentence's beginning (within ``max_shift`` seconds), else push it forward
+    to the next sentence's start. End: extend to let the current sentence
+    finish (within ``max_shift``), else retreat to just before it began.
+    Boundaries in silence are left alone; ``pad`` keeps a breath of space
+    around the speech.
+    """
+    segs = transcript.segments
+    new_start, new_end = start, end
+    for s in segs:
+        if s.start < start < s.end:  # opens mid-sentence
+            if start - s.start <= max_shift:
+                new_start = s.start
+            else:
+                nxt = [g.start for g in segs if g.start >= start]
+                if nxt:
+                    new_start = min(nxt)
+            break
+    for s in segs:
+        if s.start < end < s.end:  # closes mid-sentence
+            if s.end - end <= max_shift:
+                new_end = s.end
+            else:
+                new_end = s.start
+            break
+    new_start = max(0.0, new_start - pad)
+    new_end = new_end + pad
+    if new_end - new_start < 1.0:  # degenerate after snapping - keep original
+        return start, end
+    return round(new_start, 2), round(new_end, 2)
+
+
+def source_transcript(video_path: str, cfg: Config):
+    """Transcribe a source once, cached beside it as <file>.transcript.json -
+    a batch of windows over the same master must not re-transcribe it."""
+    cache = video_path + ".transcript.json"
+    if os.path.exists(cache):
+        return transcribe.load(cache)
+    os.makedirs(cfg.work_dir, exist_ok=True)
+    wav = audio.extract_wav(
+        video_path, os.path.join(cfg.work_dir, "source_snap.wav")
+    )
+    transcript = transcribe.transcribe(wav)
+    transcribe.save(transcript, cache)
+    return transcript
+
+
 def repurpose_asset(
     video_path: str,
     out_path: str,

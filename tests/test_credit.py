@@ -9,7 +9,7 @@ CAM = FacecamRegion(24, 24, 420, 236)
 
 def test_escape_drawtext():
     assert escape_drawtext("clip: twitch.tv/x") == "clip\\: twitch.tv/x"
-    assert escape_drawtext("100% Bob's") == "100\\% Bob\\'s"
+    assert escape_drawtext("100% Bob's") == "100\\% Bob'\\''s"  # quote-break form
     assert escape_drawtext("a\\b") == "a\\\\b"
 
 
@@ -29,7 +29,7 @@ def test_graph_with_credit_burns_text_below_facecam():
 
 def test_graph_credit_text_is_escaped():
     graph = vertical_graph(SRC, CAM, EditConfig(), credit_text="Bob's 100%: clips")
-    assert "Bob\\'s 100\\%\\: clips" in graph
+    assert "Bob'\\''s 100\\%\\: clips" in graph
 
 
 def test_credit_text_for_prefers_roster_format():
