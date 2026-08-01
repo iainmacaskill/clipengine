@@ -62,6 +62,32 @@ def test_simplicity_decreases_with_requirements():
     assert complex_.simplicity < simple.simplicity
 
 
+def test_section_polarity_from_real_brief_shape():
+    """Modeled on a real Cantina-style brief: ✅/❌ section headers whose
+    lines were all landing under 'must' before section tracking existed."""
+    brief = """\
+✅  YOU MUST
+Use English voice and sounds (we want US views)
+Post consistently on a niche page
+
+❌  YOU MUST NOT
+You use paid ads, boosts, bots, or fake views
+You repost other people's videos
+"""
+    check = parse_rules(brief)
+    assert any("English voice" in r for r in check.required)
+    assert any("niche page" in r for r in check.required)
+    assert any("fake views" in b for b in check.banned)
+    assert any("repost" in b for b in check.banned)
+    assert not any("fake views" in r for r in check.required)
+
+
+def test_marker_prefixed_items_classify_by_marker():
+    check = parse_rules("❌ AI voiceovers\n✅ Burned-in captions on every clip")
+    assert check.banned == ["AI voiceovers"]
+    assert any("Burned-in captions" in r for r in check.required)
+
+
 def test_parser_never_invents_requirements():
     check = parse_rules("Great campaign, huge budget, easy money.")
     assert check.hashtags == [] and check.mentions == []

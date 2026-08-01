@@ -114,14 +114,42 @@ def parse_rules(text: str) -> Checklist:
         canon for kw, canon in _PLATFORMS.items() if kw in lowered
     )
 
+    # real briefs use checkmark/cross section headers (✅ YOU MUST / ❌ YOU
+    # MUST NOT); lines inherit the polarity of the section they sit under,
+    # and a marker-prefixed line with its own content is an item of that
+    # polarity regardless of section
+    section = ""  # "" | "must" | "banned"
     for line in (ln.strip() for ln in text.splitlines()):
         if not line:
             continue
-        if _BANNED_LINE.search(line):
+        if _MUST_NOT_HEADER.match(line):
+            section = "banned"
+            continue
+        if _MUST_HEADER.match(line):
+            section = "must"
+            continue
+        if line.startswith(_BAD_MARKS):
+            check.banned.append(line.lstrip("".join(_BAD_MARKS)).strip() or line)
+            continue
+        if line.startswith(_GOOD_MARKS):
+            check.required.append(line.lstrip("".join(_GOOD_MARKS)).strip() or line)
+            continue
+        if section == "banned" or _BANNED_LINE.search(line):
             check.banned.append(line)
-        elif _REQUIRED_LINE.search(line):
+        elif section == "must" or _REQUIRED_LINE.search(line):
             check.required.append(line)
     return check
+
+
+_BAD_MARKS = ("❌", "🚫", "⛔")
+_GOOD_MARKS = ("✅", "✔")
+_MUST_NOT_HEADER = re.compile(
+    r"^(?:[❌🚫⛔]\s*)?(you must not|must not|do not|don'?ts?|never|banned|not allowed)\s*:?\s*$",
+    re.I,
+)
+_MUST_HEADER = re.compile(
+    r"^(?:[✅✔]️?\s*)?(you must|must|requirements?|do'?s?|required)\s*:?\s*$", re.I
+)
 
 
 def line_has_structured_requirement(line: str) -> bool:
