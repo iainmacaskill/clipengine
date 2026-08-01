@@ -48,6 +48,58 @@ def test_parses_visible_text_cards():
     assert boxabl.platforms == ["youtube", "x"]  # bare X chip counts, substrings don't
 
 
+# verbatim line shapes from a real rendered-feed --debug run (2026-08)
+SPLIT_PAGE = "\n".join([
+    "0", "$2", "/1K", "Propaganda", "·", "15d", "Product",
+    "Pacinos UGC Clipping | $50k Budget | $1 CPM",
+    "Clip and post approved Pacinos UGC content showcasing grooming products",
+    "Join Campaign", "$41,370", "/$50,000",
+    "0", "$1.80", "/1K", "Imako", "·", "7d", "Product",
+    "IMAKO Cosmetic Teeth — Clip-On Smile Transformations | $2.00 / 1K",
+    "Get paid to clip real smile transformations on TikTok.",
+    "Join Campaign", "$619", "/$2,000",
+    "0", "$1.50", "/1K", "Reachify", "·", "3mo", "Slideshow",
+    "DreamMe [HEALTH]",
+    "Make TikTok slideshow content promoting the DreamMe GLP-1 tracking app.",
+    "40% tier 1 audience reqquirement (USA,UK,CA TOP PRIORITIZED)",
+    "Join Campaign", "$19,571", "/$29,500",
+])
+
+
+def test_split_card_layout_parses_the_live_feed():
+    found = {d.title: d for d in parse_discover(SPLIT_PAGE)}
+    assert set(found) == {
+        "Pacinos UGC Clipping | $50k Budget | $1 CPM (Propaganda)",
+        "IMAKO Cosmetic Teeth — Clip-On Smile Transformations | $2.00 / 1K (Imako)",
+        "DreamMe [HEALTH] (Reachify)",
+    }
+    pacinos = found["Pacinos UGC Clipping | $50k Budget | $1 CPM (Propaganda)"]
+    assert pacinos.rate == 2.0            # from the $2 + /1K anchor, NOT the
+    assert pacinos.budget_total == 50000  # '$1 CPM' text inside the title
+    assert pacinos.budget_remaining == 8630.0  # 50,000 - 41,370
+    dreamme = found["DreamMe [HEALTH] (Reachify)"]
+    assert dreamme.rate == 1.5
+    assert dreamme.budget_remaining == 29500 - 19571
+    imako = found["IMAKO Cosmetic Teeth — Clip-On Smile Transformations | $2.00 / 1K (Imako)"]
+    assert imako.rate == 1.8              # the anchor wins over '$2.00 / 1K' in the title
+    assert imako.budget_remaining == 2000 - 619
+
+
+def test_split_cards_not_confused_by_description_rates():
+    """'Get paid $1/1k Views!' description lines were the old false anchor."""
+    page = "\n".join([
+        "$0.50", "/1K", "ClipUp Official", "·", "9d", "Entertainment",
+        "Omoggle Clipping",
+        "Clip for Omoggle and their celebrity appearances!",
+        "Get paid $1/1k Views! Viral template, easy campaign.",
+        "Join Campaign", "$3,159", "/$12,000",
+    ])
+    (d,) = parse_discover(page)
+    assert d.title == "Omoggle Clipping (ClipUp Official)"
+    assert d.rate == 0.5                      # the anchor, not the $1 in the blurb
+    assert d.budget_remaining == 12000 - 3159
+
+
 def test_category_chips_are_not_titles():
     """Live-feed defect: 'Product'/'Technology' chips sat between the real
     title and the rate and were being picked as titles."""

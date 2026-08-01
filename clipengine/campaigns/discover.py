@@ -199,6 +199,8 @@ def diagnose(html: str) -> str:
 def parse_discover(html: str) -> list[Discovered]:
     found = _from_embedded_json(html)
     if not found:
+        found = _from_split_cards(_visible_lines(html))
+    if not found:
         found = _from_visible_text(html)
     return _dedupe(found)
 
@@ -298,7 +300,7 @@ _CHIP_LABELS = {
     "product", "technology", "personal brand", "music", "gaming", "health",
     "entertainment", "education", "finance", "sports", "software", "apps",
     "crypto", "fitness", "business", "lifestyle", "other", "clipping",
-    "ugc", "faceless", "open", "active", "new",
+    "ugc", "faceless", "open", "active", "new", "slideshow", "content rewards",
 }
 
 
@@ -316,6 +318,63 @@ def card_contexts(html: str, before: int = 8, after: int = 9) -> list[list[str]]
         for i, ln in enumerate(lines)
         if _RATE_RE.search(ln)
     ]
+
+
+# the live feed's card anatomy (read from a real --debug run, 2026-08):
+#   $2            <- rate amount, its own line
+#   /1K           <- rate unit, its own line
+#   Propaganda    <- community/brand name
+#   ·
+#   15d           <- age
+#   Product       <- category chip
+#   Pacinos UGC Clipping | $50k Budget | $1 CPM     <- title
+#   Clip and post approved ... (description lines)
+#   Join Campaign
+#   $41,370       <- paid out so far
+#   /$50,000      <- total budget
+_AMOUNT_LINE = re.compile(r"^\$([\d][\d,]*\.?\d*)\s*([KkMm])?$")
+_UNIT_LINE = re.compile(r"^/\s*1[,.]?0?0?0?\s*[Kk]?$")
+_TOTAL_LINE = re.compile(r"^/\$([\d][\d,]*\.?\d*)\s*([KkMm])?$")
+_AGE_LINE = re.compile(r"^\d+\s*(mo|[smhdwy])$")
+
+
+def _from_split_cards(lines: list[str]) -> list[Discovered]:
+    """The live feed's layout: every card field on its own text line."""
+    results = []
+    n = len(lines)
+    for i, ln in enumerate(lines):
+        m = _AMOUNT_LINE.match(ln)
+        if not (m and i + 1 < n and _UNIT_LINE.match(lines[i + 1])):
+            continue
+        rate = _money(m.group(1), m.group(2))
+        brand = lines[i + 2] if i + 2 < n and lines[i + 2] != "·" else ""
+        join = next(
+            (k for k in range(i + 2, min(i + 16, n))
+             if lines[k].lower() == "join campaign"),
+            None,
+        )
+        title = next(
+            (lines[k] for k in range(i + 3, join if join is not None else min(i + 9, n))
+             if lines[k] != "·"
+             and not _AGE_LINE.match(lines[k])
+             and lines[k].lower() not in _CHIP_LABELS),
+            "",
+        )
+        if not title:
+            continue
+        paid = total = 0.0
+        if join is not None:
+            if join + 1 < n and (pm := _AMOUNT_LINE.match(lines[join + 1])):
+                paid = _money(pm.group(1), pm.group(2))
+            if join + 2 < n and (tm := _TOTAL_LINE.match(lines[join + 2])):
+                total = _money(tm.group(1), tm.group(2))
+        results.append(Discovered(
+            title=f"{title} ({brand})" if brand else title,
+            rate=rate,
+            budget_total=total,
+            budget_remaining=max(0.0, total - paid) if total else 0.0,
+        ))
+    return results
 
 
 def _from_visible_text(html: str) -> list[Discovered]:
