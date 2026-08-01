@@ -106,6 +106,46 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
+    from . import pipeline
+
+    caption = args.caption or ""
+    if args.campaign:
+        from .campaigns.store import CampaignStore
+        from .campaigns.template import build_caption, template_for
+
+        with CampaignStore(cfg.campaigns.campaigns_db) as store:
+            campaign_rec = store.get(args.campaign)
+        if campaign_rec is None:
+            print(f"unknown campaign: {args.campaign}", file=sys.stderr)
+            return 1
+        caption = build_caption(caption, template_for(campaign_rec))
+
+    out = pipeline.repurpose_asset(
+        args.video,
+        args.output,
+        cfg,
+        hook=args.hook,
+        cta=args.cta,
+        credit_text=args.credit,
+        start=args.start,
+        end=args.end,
+        with_captions=not args.no_captions,
+    )
+    print(out)
+    if caption:
+        print(f"caption: {caption}")
+    if args.campaign:
+        ok = _campaign_gate(
+            out, args.campaign, caption, args.platform or "", cfg,
+            source=args.source or "",
+            credit=" ".join(part for part in (args.credit, args.cta, args.hook) if part),
+        )
+        print("gate: PASS - ready to post" if ok else "gate: FAIL - fix before posting")
+        return 0 if ok else 1
+    return 0
+
+
 def _cmd_facecam(args: argparse.Namespace, cfg: config.Config) -> int:
     from .edit.facecam import detect_facecam
 
@@ -1211,6 +1251,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--campaign",
                    help="apply this campaign's template: mandated credit, duration bounds")
     p.set_defaults(func=_cmd_render)
+
+    p = sub.add_parser(
+        "repurpose",
+        help="repurpose provided asset footage (UGC/reposting campaigns): "
+             "fit-to-9:16 blurred fill, captions, hook, CTA - no facecam",
+    )
+    p.add_argument("video", help="the campaign-provided asset file")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--hook", help="hook text burned over the first 2.5s")
+    p.add_argument("--cta", help="call-to-action drawn into the frame")
+    p.add_argument("--credit", help="credit/watermark line at the top")
+    p.add_argument("--start", type=float, help="trim start (seconds)")
+    p.add_argument("--end", type=float, help="trim end (seconds)")
+    p.add_argument("--no-captions", action="store_true")
+    p.add_argument("--campaign", help="build a compliant caption + run the gate after rendering")
+    p.add_argument("--caption", help="caption base text (campaign tokens are appended)")
+    p.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    p.add_argument("--source", help="asset source URL (campaign source check)")
+    p.set_defaults(func=_cmd_repurpose)
 
     p = sub.add_parser("facecam", help="auto-detect the facecam region of a video")
     p.add_argument("video")

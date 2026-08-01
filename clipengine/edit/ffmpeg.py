@@ -86,6 +86,62 @@ def vertical_graph(
     return graph
 
 
+def vertical_fit_graph(
+    source: SourceVideo,
+    cfg: EditConfig,
+    credit_text: str | None = None,
+    cta_text: str | None = None,
+) -> str:
+    """Fit-to-9:16 filtergraph for repurposed asset footage (no facecam):
+    the source scaled to fit, centred over a blurred fill of itself. Optional
+    credit line at the top edge and CTA line above the caption zone."""
+    w, h = cfg.out_width, cfg.out_height
+    graph = (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,"
+        f"crop={w}:{h},boxblur=24:6[bgb];"
+        f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos[fgs];"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]"
+    )
+    if credit_text:
+        graph += (
+            f";[v]drawtext=text='{escape_drawtext(credit_text)}'"
+            f":font=Sans:fontsize={cfg.credit_font_size}"
+            f":fontcolor=white@0.9:borderw=3:bordercolor=black@0.9"
+            f":x=(w-tw)/2:y=60[v]"
+        )
+    if cta_text:
+        graph += (
+            f";[v]drawtext=text='{escape_drawtext(cta_text)}'"
+            f":font=Sans:fontsize={cfg.credit_font_size + 6}"
+            f":fontcolor=white:borderw=4:bordercolor=black"
+            f":x=(w-tw)/2:y=h-380[v]"
+        )
+    return graph
+
+
+def vertical_fit(
+    src: str,
+    dst: str,
+    source: SourceVideo,
+    cfg: EditConfig,
+    credit_text: str | None = None,
+    cta_text: str | None = None,
+) -> str:
+    """Reformat any aspect ratio to 9:16 with a blurred self-fill (no facecam)."""
+    graph = vertical_fit_graph(source, cfg, credit_text=credit_text, cta_text=cta_text)
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
+            "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
+            "-pix_fmt", "yuv420p", "-c:a", "aac", dst,
+        ],
+        check=True,
+    )
+    return dst
+
+
 def vertical(
     src: str,
     dst: str,

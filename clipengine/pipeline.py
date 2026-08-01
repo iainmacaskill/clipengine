@@ -102,6 +102,58 @@ def render_candidate(
     return edit.burn_subtitles(vert, out_path, ass, cfg.edit)
 
 
+def repurpose_asset(
+    video_path: str,
+    out_path: str,
+    cfg: Config,
+    hook: str | None = None,
+    cta: str | None = None,
+    credit_text: str | None = None,
+    start: float | None = None,
+    end: float | None = None,
+    with_captions: bool = True,
+    transcript_out: str | None = None,
+) -> str:
+    """Repurpose provided asset footage (UGC/reposting campaigns): optional trim
+    -> fit-to-9:16 over a blurred self-fill (no facecam) -> captions when the
+    asset has speech -> hook burned over the open. The campaign-mandated CTA
+    and credit are drawn into the frame.
+    """
+    work = cfg.work_dir
+    os.makedirs(work, exist_ok=True)
+    source = edit.probe(video_path)
+
+    src = video_path
+    if start is not None or end is not None:
+        begin = start or 0.0
+        duration = (end if end is not None else source.duration) - begin
+        src = edit.trim(video_path, os.path.join(work, "cut.mp4"), begin, duration, cfg.edit)
+
+    vert = edit.vertical_fit(
+        src, os.path.join(work, "vertical.mp4"), source, cfg.edit,
+        credit_text=credit_text, cta_text=cta,
+    )
+
+    stage = vert
+    if with_captions:
+        clip_wav = audio.extract_wav(vert, os.path.join(work, "clip.wav"))
+        transcript = transcribe.transcribe(clip_wav)
+        if transcript.segments:  # assets without speech skip captions cleanly
+            if transcript_out:
+                transcribe.save(transcript, transcript_out)
+            ass = captions.write_ass(
+                transcript, os.path.join(work, "captions.ass"), cfg.caption
+            )
+            stage = edit.burn_subtitles(
+                vert, os.path.join(work, "captioned.mp4"), ass, cfg.edit
+            )
+
+    if hook:
+        return edit.burn_hook(stage, out_path, hook, cfg.edit)
+    os.replace(stage, out_path)
+    return out_path
+
+
 def process_vod(
     video_path: str,
     chat_path: str | None,

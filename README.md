@@ -135,6 +135,13 @@ clipengine game-events vod.mp4 --profile profiles/league-of-legends/
 clipengine truth <vod_id> --streamer somestreamer -o truth.json
 clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
 
+# repurpose campaign-provided asset footage (UGC/reposting campaigns): any
+# aspect ratio -> 9:16 over a blurred self-fill, captions when the asset has
+# speech, hook over the open, CTA + credit drawn in; --campaign builds the
+# compliant caption and runs the gate on the result
+clipengine repurpose asset.mp4 -o post1.mp4 --campaign disc:some-campaign \
+    --hook "this AI builds Roblox GUIs" --cta "link in bio" --platform tiktok
+
 # render one window as a captioned 9:16 short (facecam auto-detected;
 # pass --facecam X,Y,W,H to override). --streamer burns their roster credit
 # into the clip; --no-credit is allowed only for private test renders
