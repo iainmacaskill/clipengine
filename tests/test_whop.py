@@ -109,6 +109,44 @@ def test_detail_failure_keeps_campaign_without_rules():
     assert c.id == "bnty_1" and c.rules_text == ""
 
 
+def test_payouts_requires_exactly_one_owner():
+    client = _client(lambda r: httpx.Response(200, json={"data": []}))
+    with pytest.raises(WhopError, match="exactly one"):
+        client.payouts()
+    with pytest.raises(WhopError, match="exactly one"):
+        client.payouts(user_id="user_1", account_id="biz_1")
+
+
+def test_payouts_paginates_read_only():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path.endswith("/payouts")
+        if request.url.params.get("after"):
+            return httpx.Response(200, json={"data": [
+                {"id": "pay_2", "amount": 10.0, "status": "completed"}
+            ], "page_info": {}})
+        return httpx.Response(200, json={"data": [
+            {"id": "pay_1", "amount": 25.0, "status": "completed"}
+        ], "page_info": {"end_cursor": "c1"}})
+
+    payouts = _client(handler).payouts(user_id="user_1")
+    assert [p["id"] for p in payouts] == ["pay_1", "pay_2"]
+    assert requests[0].url.params["user_id"] == "user_1"
+    assert all(r.method == "GET" for r in requests)
+
+
+def test_ledger_account_fetch():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/ledger_accounts/ldgr_1")
+        return httpx.Response(200, json={"id": "ldgr_1", "balance": {
+            "balance": 120.5, "pending_balance": 30.0, "currency": "usd"}})
+
+    account = _client(handler).ledger_account("ldgr_1")
+    assert account["balance"]["balance"] == 120.5
+
+
 def test_http_error_raises_whop_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, text=json.dumps({"error": "bad key"}))

@@ -886,6 +886,144 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_submissions(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .campaigns.store import CampaignStore
+    from .campaigns.submissions import (
+        REJECTION_RATE_TARGET,
+        SubmissionStore,
+    )
+
+    def show(sub) -> None:
+        marker = {"pending": "?", "approved": "+", "rejected": "x", "paid": "$"}
+        extra = ""
+        if sub.status == "paid":
+            extra = f"  {sub.amount:g} paid"
+        elif sub.status == "rejected":
+            extra = f"  ({sub.rejection_reason})"
+        print(
+            f"{marker[sub.status]} #{sub.id:<4} {sub.status:<9} {sub.campaign_id:<28} "
+            f"{sub.views:>8} views{extra}  {sub.post_url}"
+        )
+
+    with SubmissionStore(cfg.campaigns.campaigns_db) as subs:
+        if args.submissions_action == "add":
+            with CampaignStore(cfg.campaigns.campaigns_db) as store:
+                campaign = store.get(args.campaign)
+            if campaign is None:
+                print(f"unknown campaign: {args.campaign}", file=sys.stderr)
+                return 1
+            if not campaign.open:
+                print(
+                    f"warning: campaign is {campaign.status} - submissions may not pay",
+                    file=sys.stderr,
+                )
+            sub = subs.add(
+                args.campaign, args.url,
+                platform=args.platform or "", account=args.account or "",
+                title=args.title or "",
+            )
+            print(f"#{sub.id} pending: {sub.post_url} -> {sub.campaign_id}")
+        elif args.submissions_action == "list":
+            entries = subs.list(status=args.status, campaign_id=args.campaign)
+            if not entries:
+                print("no submissions tracked")
+            for sub in entries:
+                show(sub)
+        elif args.submissions_action == "approve":
+            show(subs.approve(args.id))
+        elif args.submissions_action == "reject":
+            show(subs.reject(args.id, args.reason))
+        elif args.submissions_action == "paid":
+            if args.views is not None:
+                subs.set_views(args.id, args.views)
+            show(subs.mark_paid(args.id, args.amount))
+        elif args.submissions_action == "views":
+            show(subs.set_views(args.id, args.views))
+        elif args.submissions_action == "sync":
+            moved = subs.auto_approve()
+            if not moved:
+                print("nothing past the 48h auto-approval window")
+            for sub in moved:
+                print(f"#{sub.id} auto-approved (submitted {sub.submitted_at})")
+                print(
+                    "  verify on Whop - auto-approval assumes the brand didn't reject",
+                    file=sys.stderr,
+                )
+        elif args.submissions_action == "stats":
+            with CampaignStore(cfg.campaigns.campaigns_db) as store:
+                campaigns = {c.id: c for c in store.list()}
+            rollup = subs.earnings(campaigns)
+            if not rollup:
+                print("no submissions tracked")
+                return 0
+            grand_paid = grand_views = 0.0
+            for e in rollup:
+                rate = e.rejection_rate
+                rate_s = f"{rate:.0%}" if rate is not None else "n/a"
+                flag = (
+                    "  <-- over 15% target"
+                    if rate is not None and rate > REJECTION_RATE_TARGET
+                    else ""
+                )
+                cpm = e.effective_cpm
+                cpm_s = f"{cpm:.2f}/1k" if cpm is not None else "-"
+                tta = (
+                    f"{e.avg_hours_to_approval:.0f}h"
+                    if e.avg_hours_to_approval is not None
+                    else "-"
+                )
+                title = campaigns.get(e.campaign_id)
+                print(f"{e.campaign_id}  ({title.title if title else 'unknown campaign'})")
+                print(
+                    f"  {e.total} submitted: {e.pending} pending, {e.approved} approved, "
+                    f"{e.paid} paid, {e.rejected} rejected (rate {rate_s}){flag}"
+                )
+                print(
+                    f"  paid {e.paid_amount:g} (+{e.expected_amount:g} expected), "
+                    f"{e.views} views, effective CPM {cpm_s}, approval time {tta}"
+                )
+                grand_paid += e.paid_amount
+                grand_views += e.views
+            print(
+                f"TOTAL paid {grand_paid:g} across {int(grand_views)} views"
+                + (
+                    f" (overall CPM {grand_paid / grand_views * 1000:.2f}/1k)"
+                    if grand_views and grand_paid
+                    else ""
+                )
+            )
+        else:  # reconcile
+            from .campaigns.whop import WhopClient, WhopError
+
+            rollup = subs.earnings()
+            paid_total = sum(e.paid_amount for e in rollup)
+            expected = sum(e.expected_amount for e in rollup)
+            print(f"tracker: {paid_total:g} recorded as paid, {expected:g} expected outstanding")
+            if not (args.user or args.ledger):
+                print("pass --user user_xxx and/or --ledger ldgr_xxx to compare against Whop")
+                return 0
+            try:
+                client = WhopClient(cfg.campaigns.api_key)
+                if args.user:
+                    payouts = client.payouts(user_id=args.user)
+                    completed = sum(
+                        float(p.get("amount") or 0)
+                        for p in payouts
+                        if p.get("status") == "completed"
+                    )
+                    print(f"whop: {completed:g} withdrawn ({len(payouts)} payout(s))")
+                if args.ledger:
+                    balance = (client.ledger_account(args.ledger).get("balance") or {})
+                    print(
+                        f"whop: balance {balance.get('balance', 0):g}, "
+                        f"pending {balance.get('pending_balance', 0):g}"
+                    )
+            except WhopError as e:
+                print(str(e), file=sys.stderr)
+                return 2
+    return 0
+
+
 def _cmd_vods(args: argparse.Namespace, cfg: config.Config) -> int:
     from .ingest.twitch import TwitchClient
 
@@ -1139,6 +1277,39 @@ def main(argv: list[str] | None = None) -> int:
     cc.add_argument("--credit", help="credit text burned into the clip")
     p.set_defaults(func=_cmd_campaigns)
 
+    p = sub.add_parser(
+        "submissions",
+        help="track Whop submissions: pending -> approved (48h) -> paid, earnings rollup",
+    )
+    ssub2 = p.add_subparsers(dest="submissions_action", required=True)
+    sa = ssub2.add_parser("add", help="record a submission made through the Whop web flow")
+    sa.add_argument("campaign", help="stored campaign id")
+    sa.add_argument("url", help="the posted clip's URL (as submitted)")
+    sa.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    sa.add_argument("--account", help="posting account label")
+    sa.add_argument("--title")
+    sl = ssub2.add_parser("list")
+    sl.add_argument("--status", choices=["pending", "approved", "rejected", "paid"])
+    sl.add_argument("--campaign")
+    sp_ = ssub2.add_parser("approve", help="brand approved the submission")
+    sp_.add_argument("id", type=int)
+    sj = ssub2.add_parser("reject", help="brand rejected it (reason feeds scoring)")
+    sj.add_argument("id", type=int)
+    sj.add_argument("--reason", required=True)
+    sd = ssub2.add_parser("paid", help="payout landed - record the actual amount")
+    sd.add_argument("id", type=int)
+    sd.add_argument("--amount", type=float, required=True)
+    sd.add_argument("--views", type=int, help="final verified view count")
+    sv = ssub2.add_parser("views", help="update a submission's view count")
+    sv.add_argument("id", type=int)
+    sv.add_argument("views", type=int)
+    ssub2.add_parser("sync", help="advance pending submissions past the 48h window")
+    ssub2.add_parser("stats", help="earnings dashboard: per-campaign revenue, CPM, rejection rate")
+    sr2 = ssub2.add_parser("reconcile", help="tracker totals vs Whop payouts/balance (read-only)")
+    sr2.add_argument("--user", help="Whop user id (user_xxx) for payout history")
+    sr2.add_argument("--ledger", help="ledger account id (ldgr_xxx) for balance")
+    p.set_defaults(func=_cmd_submissions)
+
     p = sub.add_parser("vods", help="list a streamer's recent VODs")
     p.add_argument("streamer")
     p.add_argument("--limit", type=int, default=5)
@@ -1153,6 +1324,9 @@ def main(argv: list[str] | None = None) -> int:
     except PermissionError_ as e:
         print(str(e), file=sys.stderr)
         return 2
+    except (ValueError, LookupError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

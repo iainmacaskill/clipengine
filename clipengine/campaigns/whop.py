@@ -11,6 +11,9 @@ generated from Whop's OpenAPI spec):
   ``business_goal_type`` filter — filtering happens client-side here.
 - ``GET /workforce/bounties/{id}`` — adds ``description`` (the rules text),
   absent from list items.
+- ``GET /payouts`` (exactly one of ``user_id``/``account_id``; same cursor
+  envelope) and ``GET /ledger_accounts/{id}`` — the balance/withdrawal side,
+  used by the submission tracker's reconciliation step.
 
 This client only ever issues GET requests — read-only campaign discovery is
 the hard boundary set in the dev brief (§4). The CPM-per-views Content
@@ -83,6 +86,37 @@ class WhopClient:
 
     def bounty(self, bounty_id: str) -> dict:
         return self._get(f"/workforce/bounties/{bounty_id}")
+
+    def payouts(
+        self,
+        user_id: str | None = None,
+        account_id: str | None = None,
+        page_size: int = 50,
+        max_pages: int = 20,
+    ) -> list[dict]:
+        """Withdrawal requests (amount/status/created_at), for reconciliation.
+
+        The API requires exactly one of user_id or account_id.
+        """
+        if bool(user_id) == bool(account_id):
+            raise WhopError("pass exactly one of user_id or account_id")
+        items: list[dict] = []
+        after: str | None = None
+        for _ in range(max_pages):
+            params: dict = {"first": page_size}
+            params["user_id" if user_id else "account_id"] = user_id or account_id
+            if after:
+                params["after"] = after
+            page = self._get("/payouts", params)
+            items.extend(page.get("data") or [])
+            after = (page.get("page_info") or {}).get("end_cursor")
+            if not after:
+                break
+        return items
+
+    def ledger_account(self, ledger_account_id: str) -> dict:
+        """Balance state (balance / pending_balance / currency) for reconciliation."""
+        return self._get(f"/ledger_accounts/{ledger_account_id}")
 
     def campaigns(
         self,

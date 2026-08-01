@@ -66,6 +66,18 @@ clipengine campaigns check clip.mp4 --campaign manual:neon-clips \
 # clip is refused (every rejected submission is unpaid work)
 clipengine publish tiktok clip.mp4 --title "clutch #NeonClips @neon" --campaign manual:neon-clips
 
+# submission tracker: record each Whop submission (made through the normal web
+# flow - no submission API exists), then track pending -> approved (48h
+# auto-approval window) -> paid, with rejection reasons feeding scoring
+clipengine submissions add manual:neon-clips https://tiktok.com/@acct/video/123 \
+    --platform tiktok --account acct1
+clipengine submissions sync                    # advance pending past the 48h window
+clipengine submissions views 1 42000
+clipengine submissions paid 1 --amount 84      # or: reject 1 --reason "credit missing"
+clipengine submissions stats                   # per-campaign revenue, effective CPM,
+                                               # rejection rate vs the <15% target
+clipengine submissions reconcile --user user_xxx --ledger ldgr_xxx   # vs Whop balance
+
 # record a streamer's permission first - ingestion is refused without it
 clipengine roster add somestreamer --source published_policy \
     --evidence "https://somestreamer.tv/clip-policy" --credit "@somestreamer in caption"
@@ -148,7 +160,8 @@ clipengine/
   roster.py       streamer permission roster (SQLite) - gates all ingestion
   campaigns/      Whop campaign intelligence: read-only bounty discovery,
                   EV scoring, rules-text -> compliance checklist, launch alerts,
-                  pre-export compliance gate (enforced by publish/queue)
+                  pre-export compliance gate (enforced by publish/queue),
+                  submission tracker (pending -> approved -> paid + earnings)
   analytics.py    performance snapshots + reporting for published posts
   review.py       human review queue - pass-rate metric, approvals feed publishing
   config.py       tunable pipeline config (TOML + env overrides)
