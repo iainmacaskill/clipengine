@@ -131,7 +131,15 @@ def render_discover(url: str = DISCOVER_URL, wait_ms: int = 4000, scrolls: int =
     if exe:
         launch_opts["executable_path"] = exe
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(**launch_opts)
+        try:
+            browser = pw.chromium.launch(**launch_opts)
+        except Exception as e:  # playwright's Error isn't importable cheaply
+            if "xecutable doesn't exist" in str(e):
+                raise RuntimeError(
+                    "playwright is installed but its browser isn't - run: "
+                    "playwright install chromium   (inside the same venv)"
+                ) from e
+            raise
         try:
             page = browser.new_page(user_agent=BROWSER_UA)
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
