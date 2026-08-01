@@ -16,6 +16,10 @@ class DetectConfig:
     weight_chat_velocity: float = 1.0
     weight_chat_emotes: float = 0.8
     weight_audio_energy: float = 0.7
+    weight_game_events: float = 1.2
+    # directory with manifest.json + template images (see detect/gamecv.py);
+    # empty = game-event detection off
+    game_profile: str = ""
     # emote tokens counted as hype/laughter reactions
     emote_tokens: list[str] = field(
         default_factory=lambda: [

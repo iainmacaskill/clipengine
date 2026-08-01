@@ -68,6 +68,10 @@ clipengine review approve 1 --title "INSANE 1v5 clutch" --queue-platform youtube
 clipengine review reject 2 --reason "cut too early"
 clipengine review stats
 
+# game-event CV: scan with a per-game template profile (killfeeds, victory
+# screens); set [detect] game_profile in config to add it as a fusion signal
+clipengine game-events vod.mp4 --profile profiles/league-of-legends/
+
 # tune detector weights against what viewers actually clipped
 clipengine truth <vod_id> --streamer somestreamer -o truth.json
 clipengine tune vod.mp4 --chat chat.jsonl --truth truth.json --write-config tuned.toml
@@ -118,8 +122,8 @@ clipengine/
   pipeline.py     batch orchestration: detect_candidates / render_candidate
   cli.py          command-line entry point
   ingest/         Twitch Helix client (VOD listing works; downloads TODO)
-  detect/         chat + audio signal extraction, fusion, optional ASR,
-                  weight tuning against viewer-clipped ground truth
+  detect/         chat + audio signal extraction, game-event template CV,
+                  fusion, optional ASR, weight tuning vs viewer-clipped truth
   edit/           ffmpeg trim / vertical reformat / subtitle burn / facecam auto-detect
   package/        ASS captions + music-DMCA screening + LLM hooks/titles/hashtags
   live/           live mode: IRC chat monitor, spike detector, clip capture

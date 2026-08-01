@@ -37,6 +37,15 @@ def compute_series(
         weights["chat_velocity"] = cfg.detect.weight_chat_velocity
         weights["chat_emotes"] = cfg.detect.weight_chat_emotes
 
+    if cfg.detect.game_profile:
+        from .detect import gamecv
+
+        game_series, _hits = gamecv.detect_events(
+            video_path, cfg.detect.game_profile, source.duration
+        )
+        series.append(game_series)
+        weights["game_events"] = cfg.detect.weight_game_events
+
     return series, weights, source.duration
 
 

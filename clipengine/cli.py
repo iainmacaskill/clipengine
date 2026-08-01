@@ -128,6 +128,19 @@ def _cmd_chat(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+def _cmd_game_events(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .detect.gamecv import detect_events
+    from .edit.ffmpeg import probe
+
+    duration = probe(args.video).duration
+    series, hits = detect_events(args.video, args.profile, duration, fps=args.fps)
+    if not hits:
+        print("no events detected")
+    for h in hits:
+        print(f"{h.at:8.1f}s  {h.name:<20} score={h.score:.2f}")
+    return 0
+
+
 def _cmd_live(args: argparse.Namespace, cfg: config.Config) -> int:
     from .live.irc import chat_messages
     from .live.monitor import default_capture, run_live
@@ -728,6 +741,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--privacy", help="youtube: private|unlisted|public; tiktok: SELF_ONLY|...")
     p.add_argument("--skip-music-check", action="store_true")
     p.set_defaults(func=_cmd_publish)
+
+    p = sub.add_parser("game-events", help="scan a video with a game profile (killfeed/victory CV)")
+    p.add_argument("video")
+    p.add_argument("--profile", required=True, help="game profile directory")
+    p.add_argument("--fps", type=float, default=1.0, help="scan rate (frames/sec)")
+    p.set_defaults(func=_cmd_game_events)
 
     p = sub.add_parser("live", help="monitor a live stream's chat; capture clips on hype spikes")
     p.add_argument("streamer", help="streamer login (must be on the roster)")
