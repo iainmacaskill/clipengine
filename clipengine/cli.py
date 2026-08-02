@@ -158,6 +158,7 @@ def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
         start=args.start,
         end=args.end,
         with_captions=not args.no_captions,
+        style=args.style,
     )
     print(out)
     if caption:
@@ -170,6 +171,19 @@ def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
         )
         print("gate: PASS - ready to post" if ok else "gate: FAIL - fix before posting")
         return 0 if ok else 1
+    return 0
+
+
+def _cmd_fonts(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .edit import textcard
+
+    if args.fonts_action == "install":
+        for name, status in textcard.install_fonts():
+            print(f"  {status:<10} {name}")
+        print(f"fonts dir: {textcard.FONT_DIR}")
+    else:  # list
+        for preset, resolved in textcard.preset_status():
+            print(f"  {preset:<14} {resolved}")
     return 0
 
 
@@ -1296,11 +1310,21 @@ def main(argv: list[str] | None = None) -> int:
                    help="snap --start/--end to sentence boundaries via Whisper so the "
                         "clip never opens or closes mid-sentence (needs clipengine[asr]; "
                         "the source transcript is cached beside the file)")
+    p.add_argument("--style", default="clean",
+                   choices=["clean", "hormozi", "hormozi-green", "beast", "block", "playful"],
+                   help="text-card look: font + accent colour preset "
+                        "(install fonts once: clipengine fonts install)")
     p.add_argument("--campaign", help="build a compliant caption + run the gate after rendering")
     p.add_argument("--caption", help="caption base text (campaign tokens are appended)")
     p.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
     p.add_argument("--source", help="asset source URL (campaign source check)")
     p.set_defaults(func=_cmd_repurpose)
+
+    p = sub.add_parser("fonts", help="clipper font packs for text cards (free/OFL)")
+    fsub = p.add_subparsers(dest="fonts_action", required=True)
+    fsub.add_parser("install", help="download the preset fonts to ~/.clipengine/fonts")
+    fsub.add_parser("list", help="show each style preset's resolved font")
+    p.set_defaults(func=_cmd_fonts)
 
     p = sub.add_parser("facecam", help="auto-detect the facecam region of a video")
     p.add_argument("video")

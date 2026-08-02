@@ -49,6 +49,9 @@ _EMOJI_RE = re.compile(
 _HILITE_RE = re.compile(r"\*([^*]+)\*")
 
 
+FONT_DIR = os.path.expanduser("~/.clipengine/fonts")
+
+
 @dataclass
 class CardStyle:
     font_size: int = 76
@@ -59,6 +62,115 @@ class CardStyle:
     highlight: str = "#FFD400"       # clipper yellow for *marked* words
     line_spacing: float = 1.18
     max_line_chars: int = 16         # short stacked lines, readable at scroll speed
+    uppercase: bool = False
+    font_candidates: tuple = ()      # preset-specific fonts, tried before globals
+    variation: str = ""              # variable-font named instance (e.g. ExtraBold)
+
+
+# named looks from the research (docs/caption-playbook.md): distinct fonts +
+# accent colours used by successful clip pages. Fonts are free/OFL, installed
+# by 'clipengine fonts install' into ~/.clipengine/fonts.
+PRESETS: dict[str, CardStyle] = {
+    # the standard clipper look - Montserrat ExtraBold, yellow keyword
+    "clean": CardStyle(
+        font_candidates=("Montserrat[wght].ttf", "Montserrat-ExtraBold.ttf"),
+        variation="ExtraBold", highlight="#FFD400",
+    ),
+    # Hormozi bold: Anton, ALL CAPS, saturated yellow keyword
+    "hormozi": CardStyle(
+        font_candidates=("Anton-Regular.ttf",), uppercase=True,
+        highlight="#FFD93D", stroke_frac=0.12,
+    ),
+    # Hormozi's green alternate - electric green reads as money/positive
+    "hormozi-green": CardStyle(
+        font_candidates=("Anton-Regular.ttf",), uppercase=True,
+        highlight="#A6FF00", stroke_frac=0.12,
+    ),
+    # comic energy (MrBeast-adjacent; Komika Axis isn't OFL, Bangers is)
+    "beast": CardStyle(
+        font_candidates=("Bangers-Regular.ttf",),
+        highlight="#FF3131", stroke_frac=0.14, font_size=82,
+    ),
+    # heavy block statement - Archivo Black, urgency red keyword
+    "block": CardStyle(
+        font_candidates=("ArchivoBlack-Regular.ttf",),
+        highlight="#FF3131",
+    ),
+    # rounded playful - Luckiest Guy, hot pink keyword
+    "playful": CardStyle(
+        font_candidates=("LuckiestGuy-Regular.ttf",),
+        highlight="#FF5CA8", stroke_frac=0.13,
+    ),
+}
+
+
+def get_preset(name: str) -> CardStyle:
+    try:
+        from dataclasses import replace
+
+        return replace(PRESETS[name])
+    except KeyError:
+        raise ValueError(
+            f"unknown style '{name}' - available: {', '.join(sorted(PRESETS))}"
+        ) from None
+
+
+# freely-licensed fonts (OFL/Apache) fetched straight from the google/fonts repo
+FONT_SOURCES = {
+    "Montserrat[wght].ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/montserrat/Montserrat%5Bwght%5D.ttf",
+    "Anton-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/anton/Anton-Regular.ttf",
+    "Bangers-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/bangers/Bangers-Regular.ttf",
+    "ArchivoBlack-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/ofl/archivoblack/ArchivoBlack-Regular.ttf",
+    "LuckiestGuy-Regular.ttf":
+        "https://raw.githubusercontent.com/google/fonts/main/apache/luckiestguy/LuckiestGuy-Regular.ttf",
+}
+
+
+def install_fonts(client=None) -> list[tuple[str, str]]:
+    """Download the preset fonts into ~/.clipengine/fonts (skip existing).
+
+    Returns (filename, status) pairs; status is 'installed', 'present', or an
+    error string. A failed download never raises - the presets fall back to
+    system fonts.
+    """
+    import httpx
+
+    os.makedirs(FONT_DIR, exist_ok=True)
+    client = client or httpx.Client(timeout=60.0, follow_redirects=True)
+    results = []
+    for name, url in FONT_SOURCES.items():
+        dest = os.path.join(FONT_DIR, name)
+        if os.path.exists(dest):
+            results.append((name, "present"))
+            continue
+        try:
+            resp = client.get(url)
+            resp.raise_for_status()
+            if len(resp.content) < 10_000:
+                raise ValueError(f"suspiciously small ({len(resp.content)} bytes)")
+            with open(dest, "wb") as f:
+                f.write(resp.content)
+            results.append((name, "installed"))
+        except Exception as e:  # noqa: BLE001 - report, don't abort the rest
+            results.append((name, f"failed: {str(e)[:80]}"))
+    return results
+
+
+def preset_status() -> list[tuple[str, str]]:
+    """(preset, resolved font path or 'missing - system fallback') pairs."""
+    rows = []
+    for name, style in PRESETS.items():
+        path = next(
+            (p for c in style.font_candidates
+             if os.path.exists(p := os.path.join(FONT_DIR, c))),
+            None,
+        )
+        rows.append((name, path or f"missing -> fallback {find_bold_font() or 'NONE'}"))
+    return rows
 
 
 def available() -> bool:
@@ -153,13 +265,24 @@ def render_text_card(text: str, out_png: str, width: int, style: CardStyle | Non
     from PIL import Image, ImageDraw, ImageFont
 
     style = style or CardStyle()
-    font_path = find_bold_font()
+    font_path = next(
+        (p for c in style.font_candidates
+         if os.path.exists(p := os.path.join(FONT_DIR, c))),
+        None,
+    ) or find_bold_font()
     if font_path is None:
         raise RuntimeError(
-            "no bold font found - set CLIPENGINE_FONT_FILE to a .ttf "
-            "(Montserrat ExtraBold recommended)"
+            "no bold font found - run 'clipengine fonts install', or set "
+            "CLIPENGINE_FONT_FILE to a .ttf (Montserrat ExtraBold recommended)"
         )
     font = ImageFont.truetype(font_path, style.font_size)
+    if style.variation:
+        try:
+            font.set_variation_by_name(style.variation)
+        except Exception:  # static font / instance not present - use as loaded
+            pass
+    if style.uppercase:
+        text = text.upper()
     stroke_w = max(2, int(style.font_size * style.stroke_frac))
     line_h = int(style.font_size * style.line_spacing)
     emoji_h = int(style.font_size * 1.05)

@@ -22,21 +22,21 @@ manifest="$OUT/posting-plan.txt"
 
 dur_s() { ffprobe -v error -show_entries format=duration -of csv=p=0 "$1" | cut -d. -f1; }
 
-render() { # src start end hook caption outfile
-    local src="$1" start="$2" end="$3" hook="$4" caption="$5" outfile="$6"
+render() { # src start end style hook caption outfile
+    local src="$1" start="$2" end="$3" style="$4" hook="$5" caption="$6" outfile="$7"
     if [ $((end - start)) -lt 12 ]; then
         echo "skip $outfile: window shorter than 12s (source too short for this door)"
         return 0
     fi
-    echo "== $outfile  [${start}s-${end}s]  hook: $hook"
+    echo "== $outfile  [${start}s-${end}s]  style: $style  hook: $hook"
     # shellcheck disable=SC2086
     clipengine repurpose "$src" -o "$OUT/$outfile" --no-captions $SNAP \
-        --campaign "$CAMPAIGN" --platform tiktok \
+        --campaign "$CAMPAIGN" --platform tiktok --style "$style" \
         --start "$start" --end "$end" \
         --hook "$hook" --caption "$caption"
     {
         echo "$outfile"
-        echo "  window: ${start}s-${end}s of $(basename "$src")"
+        echo "  window: ${start}s-${end}s of $(basename "$src")  style: $style"
         echo "  hook:    $hook"
         echo "  caption: $caption"
         echo
@@ -48,11 +48,11 @@ batch_for() { # src prefix c1..c5 h1..h5
     local d; d="$(dur_s "$src")"
     local p20=$((d * 20 / 100)) p40=$((d * 40 / 100)) p60=$((d * 60 / 100))
     local tail_start=$((d > 30 ? d - 30 : 0))
-    render "$src" 0 "$((d < 30 ? d : 30))"                    "$3" "$8"  "${prefix}_1_opener.mp4"
-    render "$src" "$p20" "$((p20 + 25 < d ? p20 + 25 : d))"   "$4" "$9"  "${prefix}_2_early.mp4"
-    render "$src" "$p40" "$((p40 + 25 < d ? p40 + 25 : d))"   "$5" "${10}" "${prefix}_3_mid.mp4"
-    render "$src" "$p60" "$((p60 + 25 < d ? p60 + 25 : d))"   "$6" "${11}" "${prefix}_4_late.mp4"
-    render "$src" "$tail_start" "$d"                          "$7" "${12}" "${prefix}_5_climax.mp4"
+    render "$src" 0 "$((d < 30 ? d : 30))"                    "${13}" "$3" "$8"  "${prefix}_1_opener.mp4"
+    render "$src" "$p20" "$((p20 + 25 < d ? p20 + 25 : d))"   "${14}" "$4" "$9"  "${prefix}_2_early.mp4"
+    render "$src" "$p40" "$((p40 + 25 < d ? p40 + 25 : d))"   "${15}" "$5" "${10}" "${prefix}_3_mid.mp4"
+    render "$src" "$p60" "$((p60 + 25 < d ? p60 + 25 : d))"   "${16}" "$6" "${11}" "${prefix}_4_late.mp4"
+    render "$src" "$tail_start" "$d"                          "${17}" "$7" "${12}" "${prefix}_5_climax.mp4"
 }
 
 T="@STARZ @StarzBlockParty #ad"
@@ -67,7 +67,8 @@ batch_for "$SRC1" "clipA" \
     "50 Cent's new show Fightland just dropped on $T and it goes HARD" \
     "me cancelling my plans to binge Fightland on $T" \
     "if this scene doesn't get you watching Fightland on $T, nothing will" \
-    "who else already started Fightland on @STARZ? @StarzBlockParty #ad"
+    "who else already started Fightland on @STARZ? @StarzBlockParty #ad" \
+    clean hormozi block beast hormozi-green
 
 batch_for "$SRC2" "clipB" \
     "your next *binge* just dropped" \
@@ -79,7 +80,8 @@ batch_for "$SRC2" "clipB" \
     "not me rewinding this Fightland scene three times... $T" \
     "the new Fightland series on @STARZ did NOT come to play @StarzBlockParty #ad" \
     "Fightland on @STARZ just took over my whole feed @StarzBlockParty #ad" \
-    "POV: you found your new favourite show. Fightland on $T"
+    "POV: you found your new favourite show. Fightland on $T" \
+    hormozi clean beast block playful
 
 echo
 echo "done - posting plan written to $manifest"

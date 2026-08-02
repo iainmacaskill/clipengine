@@ -170,6 +170,7 @@ def repurpose_asset(
     end: float | None = None,
     with_captions: bool = True,
     transcript_out: str | None = None,
+    style: str = "clean",
 ) -> str:
     """Repurpose provided asset footage (UGC/reposting campaigns): optional trim
     -> fit-to-9:16 over a blurred self-fill (no facecam) -> captions when the
@@ -212,15 +213,19 @@ def repurpose_asset(
         # hook in the top safe zone (persistent - the clipper norm); CTA
         # smaller, above the bottom UI zone
         overlays: list[tuple[str, float, float | None]] = []
+        card_style = textcard.get_preset(style)
         if hook:
             png, _h = textcard.render_text_card(
                 hook, os.path.join(work, "hook.png"), cfg.edit.out_width - 100,
+                style=card_style,
             )
             overlays.append((png, 0.12, None))
         if cta:
+            from dataclasses import replace as _replace
+
             png, _h = textcard.render_text_card(
                 cta, os.path.join(work, "cta.png"), cfg.edit.out_width - 100,
-                style=textcard.CardStyle(font_size=46),
+                style=_replace(card_style, font_size=46, uppercase=False),
             )
             overlays.append((png, 0.74, None))
         return edit.overlay_cards(stage, out_path, overlays, cfg.edit)

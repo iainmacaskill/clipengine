@@ -85,3 +85,29 @@ it is picked up first).
 Typography sources: designyourway.net/blog/best-fonts-for-tiktok,
 blitzcutai.com/blog/best-caption-fonts-tiktok, kapwing.com (TikTok fonts),
 metricool.com/tiktok-emojs-code, signalytics.ai/tiktok-emojis-codes.
+
+## Style presets (fonts + colours, implemented)
+
+Who uses what, from the research - and the matching `--style` preset:
+
+| Preset | Font | Accent | Modeled on | Fits |
+|---|---|---|---|---|
+| clean | Montserrat ExtraBold | yellow #FFD400 | the standard clipper preset | anything |
+| hormozi | Anton, ALL CAPS | yellow #FFD93D | Alex Hormozi (The Bold Font) | opinions, claims |
+| hormozi-green | Anton, ALL CAPS | green #A6FF00 | Hormozi money/positive alternate | value, "free", wins |
+| beast | Bangers | red #FF3131 | MrBeast energy (Komika Axis isn't OFL) | shock, reactions |
+| block | Archivo Black | red #FF3131 | heavy-statement pages | superlatives, urgency |
+| playful | Luckiest Guy | pink #FF5CA8 | lifestyle/comedy pages | light moments |
+
+Colour language: yellow = attention (the default), green = money/positive,
+red = urgency/shock, pink = playful. One highlighted keyword only.
+`clipengine fonts install` fetches the free (OFL/Apache) fonts from
+google/fonts into ~/.clipengine/fonts; `clipengine fonts list` shows what
+each preset resolves to. Rotating presets across a batch adds the variety
+that per-page anti-spam rules and the door-x-style A/B both want -
+docs/fightland-batch-strategy.md rotates all ten variants.
+
+Preset sources: designyourway.net/blog/what-font-does-mrbeast-use (Komika
+Axis), caply.io + ascynd.io Hormozi style guides (The Bold Font/Anton,
+#FFD93D/#A6FF00, ALL CAPS, +15% engagement claims), blitzcutai.com caption
+fonts survey.
