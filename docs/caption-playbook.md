@@ -55,3 +55,33 @@ clip-farming guides) for use across campaigns. Two distinct surfaces:
 Sources: opus.pro/blog/tiktok-caption-subtitle-best-practices,
 shareb.io/blog/tiktok-caption-strategy, marketerhire.com/blog/tiktok-captions,
 ganknow.com/blog/clip-farming, schedpilot.com/viral-tiktok-caption-ideas-for-clips.
+
+## On-screen typography (draft 2, implemented in edit/textcard.py)
+
+What the standardised "clipper look" actually is - so consistent that CapCut,
+Submagic, Opus Clip and Riverside all ship it as a preset:
+
+- **Font**: Montserrat Bold/ExtraBold (Black 900 for single-word titles);
+  any heavy geometric sans reads the same at a glance. White fill, thick
+  black outline (~10% of font size) and/or a soft drop shadow so text
+  survives any footage.
+- **Layout**: short stacked lines (3-4 words), centre-aligned, hook in the
+  top safe zone (clear of the right-side icon rail and bottom UI bar), CTA
+  smaller at ~3/4 height.
+- **Emphasis**: one keyword per hook in a highlight colour (yellow is the
+  norm) - more than one kills the effect.
+- **Emoji**: 1-3 max, placed to punctuate the hook, not decorate it. TikTok
+  captions also support [shortcode] custom emojis. Note: ffmpeg drawtext
+  cannot render colour emoji (empty boxes) - the textcard renderer exists
+  partly for this.
+- **Hook timing**: give the hook the full first 3 seconds; persistent top
+  text is the norm on clip pages.
+
+`clipengine repurpose` renders hook/CTA as text cards automatically when
+Pillow is available; `*word*` marks the highlight, `CLIPENGINE_FONT_FILE`
+points at a custom font (drop Montserrat ExtraBold into ~/Library/Fonts and
+it is picked up first).
+
+Typography sources: designyourway.net/blog/best-fonts-for-tiktok,
+blitzcutai.com/blog/best-caption-fonts-tiktok, kapwing.com (TikTok fonts),
+metricool.com/tiktok-emojs-code, signalytics.ai/tiktok-emojis-codes.

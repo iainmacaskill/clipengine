@@ -176,9 +176,12 @@ def repurpose_asset(
     asset has speech -> hook burned over the open. The campaign-mandated CTA
     and credit are drawn into the frame.
     """
+    from .edit import textcard
+
     work = cfg.work_dir
     os.makedirs(work, exist_ok=True)
     source = edit.probe(video_path)
+    cards = textcard.available()  # clipper-style text cards; drawtext fallback
 
     src = video_path
     if start is not None or end is not None:
@@ -188,7 +191,7 @@ def repurpose_asset(
 
     vert = edit.vertical_fit(
         src, os.path.join(work, "vertical.mp4"), source, cfg.edit,
-        credit_text=credit_text, cta_text=cta,
+        credit_text=credit_text, cta_text=None if cards else cta,
     )
 
     stage = vert
@@ -205,6 +208,22 @@ def repurpose_asset(
                 vert, os.path.join(work, "captioned.mp4"), ass, cfg.edit
             )
 
+    if cards and (hook or cta):
+        # hook in the top safe zone (persistent - the clipper norm); CTA
+        # smaller, above the bottom UI zone
+        overlays: list[tuple[str, float, float | None]] = []
+        if hook:
+            png, _h = textcard.render_text_card(
+                hook, os.path.join(work, "hook.png"), cfg.edit.out_width - 100,
+            )
+            overlays.append((png, 0.12, None))
+        if cta:
+            png, _h = textcard.render_text_card(
+                cta, os.path.join(work, "cta.png"), cfg.edit.out_width - 100,
+                style=textcard.CardStyle(font_size=46),
+            )
+            overlays.append((png, 0.74, None))
+        return edit.overlay_cards(stage, out_path, overlays, cfg.edit)
     if hook:
         return edit.burn_hook(stage, out_path, hook, cfg.edit)
     os.replace(stage, out_path)

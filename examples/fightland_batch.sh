@@ -58,11 +58,11 @@ batch_for() { # src prefix c1..c5 h1..h5
 T="@STARZ @StarzBlockParty #ad"
 
 batch_for "$SRC1" "clipA" \
-    "new series alert 🚨" \
-    "this scene sold me in 10 seconds" \
-    "watch this without getting chills" \
-    "the tension in this scene is unreal" \
-    "nobody was ready for this scene" \
+    "new *series* alert 🚨" \
+    "this scene *sold* me in 10 seconds" \
+    "watch this without getting *chills*" \
+    "the *tension* in this scene is unreal" \
+    "*nobody* was ready for this scene" \
     "new obsession unlocked: Fightland on $T" \
     "50 Cent's new show Fightland just dropped on $T and it goes HARD" \
     "me cancelling my plans to binge Fightland on $T" \
@@ -70,11 +70,11 @@ batch_for "$SRC1" "clipA" \
     "who else already started Fightland on @STARZ? @StarzBlockParty #ad"
 
 batch_for "$SRC2" "clipB" \
-    "your next binge just dropped" \
-    "50 Cent did it again" \
-    "the most intense new drama on TV" \
-    "you're about to be obsessed with this show" \
-    "this ending though 🤯" \
+    "your next *binge* just dropped" \
+    "50 Cent did it *again*" \
+    "the most *intense* new drama on TV" \
+    "you're about to be *obsessed* with this show" \
+    "this *ending* though 🤯" \
     "Fightland on @STARZ is the drama everyone's about to be talking about @StarzBlockParty #ad" \
     "not me rewinding this Fightland scene three times... $T" \
     "the new Fightland series on @STARZ did NOT come to play @StarzBlockParty #ad" \

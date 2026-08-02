@@ -181,6 +181,41 @@ def vertical(
     return dst
 
 
+def overlay_cards(
+    src: str,
+    dst: str,
+    cards: list[tuple[str, float, float | None]],
+    cfg: EditConfig,
+) -> str:
+    """Overlay rendered text-card PNGs in one pass.
+
+    Each card is (png_path, y_fraction_of_height, seconds_or_None): centred
+    horizontally, positioned at y = fraction * H, shown for the first N
+    seconds or persistently when None.
+    """
+    inputs: list[str] = ["-i", src]
+    chains = []
+    prev = "0:v"
+    for i, (png, y_frac, seconds) in enumerate(cards, start=1):
+        inputs += ["-i", png]
+        enable = f":enable='lt(t,{seconds})'" if seconds else ""
+        label = "v" if i == len(cards) else f"s{i}"
+        chains.append(
+            f"[{prev}][{i}:v]overlay=(W-w)/2:{y_frac:.3f}*H{enable}[{label}]"
+        )
+        prev = label
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", *inputs,
+            "-filter_complex", ";".join(chains), "-map", "[v]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
+            "-pix_fmt", "yuv420p", "-c:a", "copy", dst,
+        ],
+        check=True,
+    )
+    return dst
+
+
 def burn_hook(src: str, dst: str, hook_text: str, cfg: EditConfig) -> str:
     """Burn a large text hook over the first 2.5 seconds of a vertical clip."""
     y = cfg.facecam_tile_height + 70

@@ -71,7 +71,43 @@ def fakes(monkeypatch, tmp_path):
         pipeline.edit, "burn_hook",
         lambda src, dst, hook, c: calls.setdefault("hook", hook) and touch(dst) or touch(dst),
     )
+    # these tests cover the drawtext fallback; the text-card path has its own
+    monkeypatch.setattr("clipengine.edit.textcard.available", lambda: False)
     return calls
+
+
+def test_repurpose_textcard_path(cfg, fakes, tmp_path, monkeypatch):
+    """With Pillow available, hook + CTA become styled cards in one overlay pass."""
+    import clipengine.edit.textcard as tc
+    from clipengine.edit import ffmpeg as edit_ffmpeg
+
+    monkeypatch.setattr("clipengine.edit.textcard.available", lambda: True)
+    rendered = []
+
+    def fake_card(text, out_png, width, style=None):
+        rendered.append((text, width, getattr(style, "font_size", 76)))
+        open(out_png, "w").write("png")
+        return out_png, 120
+
+    monkeypatch.setattr(tc, "render_text_card", fake_card)
+    overlaid = {}
+
+    def fake_overlay(src, dst, cards, c):
+        overlaid["cards"] = [(y, sec) for _p, y, sec in cards]
+        open(dst, "w").write("out")
+        return dst
+
+    monkeypatch.setattr(edit_ffmpeg, "overlay_cards", fake_overlay)
+    out = pipeline.repurpose_asset(
+        "asset.mp4", str(tmp_path / "out.mp4"), cfg, with_captions=False,
+        hook="new *series* alert 🚨", cta="link in bio",
+    )
+    assert out == str(tmp_path / "out.mp4")
+    assert [t for t, _w, _s in rendered] == ["new *series* alert 🚨", "link in bio"]
+    assert rendered[1][2] == 46                      # CTA renders smaller
+    assert overlaid["cards"] == [(0.12, None), (0.74, None)]  # safe zones, persistent
+    # CTA moved out of vertical_fit's drawtext and into the card pass
+    assert fakes["fit"]["cta"] is None
 
 
 def test_repurpose_no_speech_skips_captions(cfg, fakes, tmp_path):
