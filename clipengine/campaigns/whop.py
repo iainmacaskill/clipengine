@@ -36,21 +36,14 @@ from .models import REWARD_PER_SUBMISSION, Campaign
 
 BASE_URL = "https://api.whop.com/api/v1"
 DEFAULT_GOAL_TYPES = ("clipping", "ugc_content")
-API_KEY_ENVS = ("CLIPENGINE_WHOP_API_KEY", "WHOP_API_KEY")
 APP_ID_ENVS = ("CLIPENGINE_WHOP_APP_ID", "WHOP_APP_ID")
 API_VERSION = "2026-07-08-1"  # the SDK's default Api-Version-Date - sent always
 
 
 class WhopError(RuntimeError):
-    pass
-
-
-def api_key_from_env() -> str:
-    for name in API_KEY_ENVS:
-        key = os.environ.get(name, "")
-        if key:
-            return key
-    return ""
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class WhopClient:
@@ -79,11 +72,15 @@ class WhopClient:
             app_id = next((os.environ[e] for e in APP_ID_ENVS if os.environ.get(e)), None)
         if app_id:
             self._headers["X-Whop-App-Id"] = app_id
+        self._surface: str | None = None  # resolved bounty surface, cached on first list
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         resp = self._client.get(self._base + path, params=params, headers=self._headers)
         if resp.status_code >= 400:
-            raise WhopError(f"GET {path} failed: {resp.status_code} {resp.text[:200]}")
+            raise WhopError(
+                f"GET {path} failed: {resp.status_code} {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
         return resp.json()
 
     def _paged(self, path: str, params: dict, page_size: int, max_pages: int) -> list[dict]:
@@ -112,15 +109,19 @@ class WhopClient:
         no ``business_goal_type`` key (the read model doesn't expose it), no
         per-submission reward, and their ``description`` inline.
         """
-        try:
-            return self._paged(
-                "/workforce/bounties",
-                {"status": status, "order": "created_at", "direction": "desc"},
-                page_size, max_pages,
-            )
-        except WhopError as e:
-            if " 404 " not in str(e):
-                raise
+        if self._surface != "legacy":
+            try:
+                items = self._paged(
+                    "/workforce/bounties",
+                    {"status": status, "order": "created_at", "direction": "desc"},
+                    page_size, max_pages,
+                )
+                self._surface = "workforce"
+                return items
+            except WhopError as e:
+                if e.status_code != 404:
+                    raise
+                self._surface = "legacy"  # skip the probe on later calls
         legacy = self._paged(
             "/bounties",
             {"status": _LEGACY_STATUS.get(status, status)},
@@ -144,19 +145,8 @@ class WhopClient:
         """
         if bool(user_id) == bool(account_id):
             raise WhopError("pass exactly one of user_id or account_id")
-        items: list[dict] = []
-        after: str | None = None
-        for _ in range(max_pages):
-            params: dict = {"first": page_size}
-            params["user_id" if user_id else "account_id"] = user_id or account_id
-            if after:
-                params["after"] = after
-            page = self._get("/payouts", params)
-            items.extend(page.get("data") or [])
-            after = (page.get("page_info") or {}).get("end_cursor")
-            if not after:
-                break
-        return items
+        params = {"user_id" if user_id else "account_id": user_id or account_id}
+        return self._paged("/payouts", params, page_size, max_pages)
 
     def ledger_account(self, ledger_account_id: str) -> dict:
         """Balance state (balance / pending_balance / currency) for reconciliation."""

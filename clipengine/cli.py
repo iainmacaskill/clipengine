@@ -69,29 +69,21 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
             file=sys.stderr,
         )
     if args.campaign:
-        from .campaigns.store import CampaignStore
         from .campaigns.template import merge_credit, template_for
 
-        with CampaignStore(cfg.campaigns.campaigns_db) as store:
-            campaign_rec = store.get(args.campaign)
+        campaign_rec = _load_campaign(cfg, args.campaign)
         if campaign_rec is None:
-            print(f"unknown campaign: {args.campaign}", file=sys.stderr)
             return 1
         template = template_for(campaign_rec)
         credit = merge_credit(credit or "", template) or None
         duration = args.end - args.start
-        for bound, ok in (
-            (template.min_duration_s, template.min_duration_s is None
-             or duration >= template.min_duration_s),
-            (template.max_duration_s, template.max_duration_s is None
-             or duration <= template.max_duration_s),
-        ):
-            if not ok:
-                print(
-                    f"warning: {duration:g}s is outside the campaign's duration "
-                    f"bound ({bound:g}s) - the compliance gate will refuse this clip",
-                    file=sys.stderr,
-                )
+        lo, hi = template.min_duration_s, template.max_duration_s
+        if (lo is not None and duration < lo) or (hi is not None and duration > hi):
+            print(
+                f"warning: {duration:g}s is outside the campaign's duration "
+                f"bounds ({lo}-{hi}s) - the compliance gate will refuse this clip",
+                file=sys.stderr,
+            )
     candidate = ClipCandidate(start=args.start, end=args.end, score=0.0)
     out = pipeline.render_candidate(
         args.video,
@@ -106,18 +98,70 @@ def _cmd_render(args: argparse.Namespace, cfg: config.Config) -> int:
     return 0
 
 
+
+def _load_campaign(cfg: config.Config, campaign_id: str, warn_closed: bool = False):
+    """Fetch a stored campaign; prints the standard errors. None = bail."""
+    from .campaigns.store import CampaignStore
+
+    with CampaignStore(cfg.campaigns.campaigns_db) as store:
+        campaign = store.get(campaign_id)
+    if campaign is None:
+        print(f"unknown campaign: {campaign_id}", file=sys.stderr)
+    elif warn_closed and not campaign.open:
+        print(
+            f"warning: campaign is {campaign.status} - submissions may not pay",
+            file=sys.stderr,
+        )
+    return campaign
+
+
+def _post_text(args: argparse.Namespace) -> str:
+    """The full text a post will carry - what the compliance gate checks."""
+    return " ".join(
+        part for part in (args.title, args.description or "", args.tags or "") if part
+    )
+
+
+def _gate_post(args: argparse.Namespace, cfg: config.Config, verb: str) -> bool:
+    """Run the campaign gate for a publish/queue action; prints the refusal."""
+    if _campaign_gate(
+        args.video, args.campaign, _post_text(args), args.platform, cfg,
+        source=args.source or "",
+    ):
+        return True
+    print(
+        f"{verb} refused: campaign compliance gate failed - every rejected "
+        "clip is unpaid work. Fix the caption/clip or pick another campaign.",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _alert_new(new_campaigns, cfg: config.Config) -> None:
+    """Launch alerts for newly seen campaigns above the score threshold."""
+    from .campaigns import alerts
+    from .campaigns.score import rank
+
+    alertable = [
+        s for s in rank(new_campaigns, cfg.campaigns.familiarity)
+        if s.score >= cfg.campaigns.alert_min_score
+    ]
+    for s in alertable:
+        print(f"  new: [{s.score:.1f}] {s.campaign.title} ({s.campaign.id})")
+    if alertable and cfg.campaigns.alert_webhook:
+        ok = alerts.notify(cfg.campaigns.alert_webhook, alertable)
+        print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)} campaign(s))")
+
+
 def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
     from . import pipeline
 
     caption = args.caption or ""
     if args.campaign:
-        from .campaigns.store import CampaignStore
         from .campaigns.template import build_caption, template_for
 
-        with CampaignStore(cfg.campaigns.campaigns_db) as store:
-            campaign_rec = store.get(args.campaign)
+        campaign_rec = _load_campaign(cfg, args.campaign)
         if campaign_rec is None:
-            print(f"unknown campaign: {args.campaign}", file=sys.stderr)
             return 1
         caption = build_caption(caption, template_for(campaign_rec))
 
@@ -424,20 +468,8 @@ def _campaign_gate(
 
 
 def _cmd_publish(args: argparse.Namespace, cfg: config.Config) -> int:
-    if args.campaign:
-        caption = " ".join(
-            part for part in (args.title, args.description or "", args.tags or "") if part
-        )
-        if not _campaign_gate(
-            args.video, args.campaign, caption, args.platform, cfg,
-            source=args.source or "",
-        ):
-            print(
-                "publish refused: campaign compliance gate failed - every rejected "
-                "clip is unpaid work. Fix the caption/clip or pick another campaign.",
-                file=sys.stderr,
-            )
-            return 3
+    if args.campaign and not _gate_post(args, cfg, "publish"):
+        return 3
     if not args.skip_music_check and not _screen_for_music(args.video, cfg):
         print(
             "publish refused: music-likely segments found. Mute them first "
@@ -496,20 +528,8 @@ def _cmd_queue(args: argparse.Namespace, cfg: config.Config) -> int:
 
     with Queue(cfg.schedule.queue_db) as queue:
         if args.queue_action == "add":
-            if args.campaign:
-                caption = " ".join(
-                    part for part in (args.title, args.description or "", args.tags or "")
-                    if part
-                )
-                if not _campaign_gate(
-                    args.video, args.campaign, caption, args.platform, cfg,
-                    source=args.source or "",
-                ):
-                    print(
-                        "queue refused: campaign compliance gate failed",
-                        file=sys.stderr,
-                    )
-                    return 3
+            if args.campaign and not _gate_post(args, cfg, "queue"):
+                return 3
             post = queue.add(
                 args.platform,
                 args.account,
@@ -918,7 +938,7 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
         if args.campaigns_action == "discover":
             import httpx as _httpx
 
-            from .campaigns import alerts, discover
+            from .campaigns import discover
 
             if args.file:
                 with open(args.file, encoding="utf-8", errors="replace") as f:
@@ -992,13 +1012,7 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
             if args.add:
                 new = store.upsert([s.campaign for s in shown])
                 print(f"stored {len(shown)} campaign(s), {len(new)} new")
-                alertable = [
-                    s for s in rank(new, cfg.campaigns.familiarity)
-                    if s.score >= cfg.campaigns.alert_min_score
-                ]
-                if alertable and cfg.campaigns.alert_webhook:
-                    ok = alerts.notify(cfg.campaigns.alert_webhook, alertable)
-                    print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)})")
+                _alert_new(new, cfg)
                 print(
                     "note: rules text is not on the discover feed - open each "
                     "campaign page and attach its brief before producing: "
@@ -1006,7 +1020,6 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                 )
             return 0
         if args.campaigns_action == "sync":
-            from .campaigns import alerts
             from .campaigns.whop import WhopClient, WhopError
 
             try:
@@ -1029,17 +1042,11 @@ def _cmd_campaigns(args: argparse.Namespace, cfg: config.Config) -> int:
                 return 2
             new = store.upsert(fetched)
             print(f"synced {len(fetched)} campaign(s), {len(new)} new")
-            alertable = [
-                s for s in rank(new, cfg.campaigns.familiarity)
-                if s.score >= cfg.campaigns.alert_min_score
-            ]
-            for s in alertable:
-                print(f"  new: [{s.score:.1f}] {s.campaign.title} ({s.campaign.id})")
-            if alertable and cfg.campaigns.alert_webhook:
-                ok = alerts.notify(cfg.campaigns.alert_webhook, alertable)
-                print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)} campaign(s))")
+            _alert_new(new, cfg)
         elif args.campaigns_action == "add":
-            slug = args.id or "manual:" + "-".join(args.title.lower().split())[:48]
+            from .campaigns.models import slugify
+
+            slug = args.id or "manual:" + slugify(args.title)
             rules_text = args.rules or ""
             if args.rules_file:
                 with open(args.rules_file) as f:
@@ -1143,16 +1150,8 @@ def _cmd_submissions(args: argparse.Namespace, cfg: config.Config) -> int:
 
     with SubmissionStore(cfg.campaigns.campaigns_db) as subs:
         if args.submissions_action == "add":
-            with CampaignStore(cfg.campaigns.campaigns_db) as store:
-                campaign = store.get(args.campaign)
-            if campaign is None:
-                print(f"unknown campaign: {args.campaign}", file=sys.stderr)
+            if _load_campaign(cfg, args.campaign, warn_closed=True) is None:
                 return 1
-            if not campaign.open:
-                print(
-                    f"warning: campaign is {campaign.status} - submissions may not pay",
-                    file=sys.stderr,
-                )
             sub = subs.add(
                 args.campaign, args.url,
                 platform=args.platform or "", account=args.account or "",
@@ -1310,13 +1309,16 @@ def main(argv: list[str] | None = None) -> int:
                    help="snap --start/--end to sentence boundaries via Whisper so the "
                         "clip never opens or closes mid-sentence (needs clipengine[asr]; "
                         "the source transcript is cached beside the file)")
-    p.add_argument("--style", default="clean",
-                   choices=["clean", "hormozi", "hormozi-green", "beast", "block", "playful"],
+    from .campaigns.models import PLATFORMS as _plat
+    from .campaigns.discover import DISCOVER_URL as _durl
+    from .edit.textcard import PRESETS as _presets
+
+    p.add_argument("--style", default="clean", choices=sorted(_presets),
                    help="text-card look: font + accent colour preset "
                         "(install fonts once: clipengine fonts install)")
     p.add_argument("--campaign", help="build a compliant caption + run the gate after rendering")
     p.add_argument("--caption", help="caption base text (campaign tokens are appended)")
-    p.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    p.add_argument("--platform", choices=list(_plat))
     p.add_argument("--source", help="asset source URL (campaign source check)")
     p.set_defaults(func=_cmd_repurpose)
 
@@ -1546,7 +1548,7 @@ def main(argv: list[str] | None = None) -> int:
         help="parse the public Content Rewards discover feed, rank by best rewards "
              "(read-only; the CPM campaigns have no API)",
     )
-    cd_.add_argument("--url", default="https://whop.com/discover/app/app_QRxsQodZgK1r4D/")
+    cd_.add_argument("--url", default=_durl)
     cd_.add_argument("--file", help="parse a browser-saved copy of the page instead of fetching")
     cd_.add_argument("--browser", action="store_true",
                      help="render in headless Chromium first (the feed is client-"
@@ -1570,7 +1572,7 @@ def main(argv: list[str] | None = None) -> int:
     cc.add_argument("video")
     cc.add_argument("--campaign", required=True, help="stored campaign id")
     cc.add_argument("--caption", help="the full text that will be posted with the clip")
-    cc.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    cc.add_argument("--platform", choices=list(_plat))
     cc.add_argument("--source", help="source URL of the footage")
     cc.add_argument("--credit", help="credit text burned into the clip")
     p.set_defaults(func=_cmd_campaigns)
@@ -1583,7 +1585,7 @@ def main(argv: list[str] | None = None) -> int:
     sa = ssub2.add_parser("add", help="record a submission made through the Whop web flow")
     sa.add_argument("campaign", help="stored campaign id")
     sa.add_argument("url", help="the posted clip's URL (as submitted)")
-    sa.add_argument("--platform", choices=["tiktok", "youtube", "instagram", "x", "facebook"])
+    sa.add_argument("--platform", choices=list(_plat))
     sa.add_argument("--account", help="posting account label")
     sa.add_argument("--title")
     sl = ssub2.add_parser("list")

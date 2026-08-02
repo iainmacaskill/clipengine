@@ -12,11 +12,11 @@ per campaign for the dashboard and close the loop to Phase 1 scoring.
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from ..db import SqliteStore, utc_now
 from .models import REWARD_CPM, Campaign
 
 STATUSES = ("pending", "approved", "rejected", "paid")
@@ -44,10 +44,6 @@ CREATE TABLE IF NOT EXISTS submissions (
     UNIQUE (campaign_id, post_url)
 );
 """
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 @dataclass
@@ -103,22 +99,8 @@ def expected_amount(sub: Submission, campaign: Campaign | None) -> float:
     return campaign.reward_amount
 
 
-class SubmissionStore:
-    def __init__(self, db_path: str):
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SubmissionStore:
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.close()
+class SubmissionStore(SqliteStore):
+    SCHEMA = _SCHEMA
 
     def add(
         self,
@@ -137,7 +119,7 @@ class SubmissionStore:
                 """INSERT INTO submissions
                    (campaign_id, post_url, platform, account, title, submitted_at)
                    VALUES (?,?,?,?,?,?)""",
-                (campaign_id, post_url, platform, account, title, at or _now()),
+                (campaign_id, post_url, platform, account, title, at or utc_now()),
             )
         except sqlite3.IntegrityError:
             raise ValueError(
@@ -176,7 +158,7 @@ class SubmissionStore:
             raise ValueError(f"#{sub_id} is {sub.status}, only pending can be approved")
         self._conn.execute(
             "UPDATE submissions SET status='approved', approved_at=? WHERE id=?",
-            (at or _now(), sub_id),
+            (at or utc_now(), sub_id),
         )
         self._conn.commit()
         return self.get(sub_id)
@@ -191,7 +173,7 @@ class SubmissionStore:
         self._conn.execute(
             "UPDATE submissions SET status='rejected', rejected_at=?, "
             "rejection_reason=? WHERE id=?",
-            (at or _now(), reason.strip(), sub_id),
+            (at or utc_now(), reason.strip(), sub_id),
         )
         self._conn.commit()
         return self.get(sub_id)
@@ -206,7 +188,7 @@ class SubmissionStore:
         sub = self.get(sub_id)
         if sub.status == "rejected":
             raise ValueError(f"#{sub_id} was rejected, cannot mark paid")
-        at = at or _now()
+        at = at or utc_now()
         self._conn.execute(
             "UPDATE submissions SET status='paid', paid_at=?, amount=?, "
             "approved_at=COALESCE(approved_at, ?) WHERE id=?",
@@ -260,7 +242,14 @@ class SubmissionStore:
         for sub in self.list():
             e = rollup.setdefault(sub.campaign_id, CampaignEarnings(sub.campaign_id))
             e.total += 1
-            setattr(e, sub.status, getattr(e, sub.status) + 1)
+            if sub.status == "pending":
+                e.pending += 1
+            elif sub.status == "approved":
+                e.approved += 1
+            elif sub.status == "rejected":
+                e.rejected += 1
+            elif sub.status == "paid":
+                e.paid += 1
             e.views += sub.views
             if sub.status == "paid":
                 e.paid_amount += sub.amount

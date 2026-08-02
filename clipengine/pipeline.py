@@ -126,9 +126,9 @@ def snap_to_speech(
             if start - s.start <= max_shift:
                 new_start = s.start
             else:
-                nxt = [g.start for g in segs if g.start >= start]
-                if nxt:
-                    new_start = min(nxt)
+                new_start = next(
+                    (g.start for g in segs if g.start >= start), new_start
+                )
             break
     for s in segs:
         if s.start < end < s.end:  # closes mid-sentence
@@ -181,18 +181,17 @@ def repurpose_asset(
 
     work = cfg.work_dir
     os.makedirs(work, exist_ok=True)
-    source = edit.probe(video_path)
-    cards = textcard.available()  # clipper-style text cards; drawtext fallback
+    use_cards = textcard.available()  # clipper-style text cards; drawtext fallback
 
     src = video_path
     if start is not None or end is not None:
         begin = start or 0.0
-        duration = (end if end is not None else source.duration) - begin
-        src = edit.trim(video_path, os.path.join(work, "cut.mp4"), begin, duration, cfg.edit)
+        stop = end if end is not None else edit.probe(video_path).duration
+        src = edit.trim(video_path, os.path.join(work, "cut.mp4"), begin, stop - begin, cfg.edit)
 
     vert = edit.vertical_fit(
-        src, os.path.join(work, "vertical.mp4"), source, cfg.edit,
-        credit_text=credit_text, cta_text=None if cards else cta,
+        src, os.path.join(work, "vertical.mp4"), cfg.edit,
+        credit_text=credit_text, cta_text=None if use_cards else cta,
     )
 
     stage = vert
@@ -209,7 +208,7 @@ def repurpose_asset(
                 vert, os.path.join(work, "captioned.mp4"), ass, cfg.edit
             )
 
-    if cards and (hook or cta):
+    if use_cards and (hook or cta):
         # hook in the top safe zone (persistent - the clipper norm); CTA
         # smaller, above the bottom UI zone
         overlays: list[tuple[str, float, float | None]] = []
@@ -265,7 +264,7 @@ def process_vod(
     clip gets a ready-to-post caption carrying the required hashtags/mentions,
     and the compliance gate report is recorded per clip in the manifest.
     """
-    import copy
+    from dataclasses import replace as _replace
 
     from .package import hooks
     from .package.music import check as music_check, mute_segments
@@ -285,8 +284,7 @@ def process_vod(
         template = template_for(campaign)
         target = effective_target(template, cfg.detect.target_duration)
         if target != cfg.detect.target_duration:
-            cfg = copy.deepcopy(cfg)
-            cfg.detect.target_duration = target
+            cfg = _replace(cfg, detect=_replace(cfg.detect, target_duration=target))
         credit = merge_credit(credit, template)
 
     os.makedirs(out_dir, exist_ok=True)

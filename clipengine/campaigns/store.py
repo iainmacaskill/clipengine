@@ -11,10 +11,9 @@ analytics store pattern.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-from datetime import datetime, timezone
 
+from ..db import SqliteStore, utc_now
 from .models import Campaign, Snapshot
 
 _SCHEMA = """
@@ -54,26 +53,8 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_campaign ON snapshots (campaign_id, at)
 """
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-class CampaignStore:
-    def __init__(self, db_path: str):
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> CampaignStore:
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.close()
+class CampaignStore(SqliteStore):
+    SCHEMA = _SCHEMA
 
     def upsert(self, campaigns: list[Campaign], at: str | None = None) -> list[Campaign]:
         """Insert/update campaigns + append a snapshot each; returns the new ones.
@@ -81,11 +62,12 @@ class CampaignStore:
         An update never blanks rules_text: a later shallow sync (rules fetch
         skipped or failed) keeps the rules captured earlier.
         """
-        at = at or _now()
-        new: list[Campaign] = []
+        at = at or utc_now()
+        known = {
+            row[0] for row in self._conn.execute("SELECT id FROM campaigns")
+        }
+        new = [c for c in campaigns if c.id not in known]
         for c in campaigns:
-            if self.get(c.id) is None:
-                new.append(c)
             self._conn.execute(
                 """INSERT INTO campaigns
                    (id, source, title, brand, goal_type, status, currency,

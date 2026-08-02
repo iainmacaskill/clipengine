@@ -9,10 +9,19 @@ One normalised shape covers both campaign kinds:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 REWARD_PER_SUBMISSION = "per_submission"
 REWARD_CPM = "cpm"  # reward_amount is per 1,000 verified views
+
+# canonical platform vocabulary - argparse choices, rules/discover parsing,
+# and the gate's platform check all compare against these names
+PLATFORMS = ("tiktok", "youtube", "instagram", "x", "facebook")
+
+
+def slugify(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48]
 
 
 @dataclass
@@ -39,6 +48,12 @@ class Campaign:
     @property
     def open(self) -> bool:
         return self.status == "open"
+
+    @property
+    def reward_str(self) -> str:
+        """One rendering of the reward across alerts and CLI tables."""
+        unit = "/1k views" if self.reward_model == REWARD_CPM else "/submission"
+        return f"{self.reward_amount:g} {self.currency}{unit}"
 
 
 @dataclass

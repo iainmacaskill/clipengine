@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .models import Campaign
+from .models import Campaign, slugify
 
 # /discover/content-rewards/ redirects here (Content Rewards is a Whop app)
 DISCOVER_URL = "https://whop.com/discover/app/app_QRxsQodZgK1r4D/"
@@ -55,7 +55,7 @@ def _platforms_in(chunks: list[str]) -> list[str]:
 
 # "$1.50 / 1K", "$1 per 1k views", "$0.50/1,000 views"
 _RATE_RE = re.compile(
-    r"\$\s*([\d][\d,]*\.?\d*)\s*(?:/|per)\s*1[,.]?0?0?0?\s*[Kk]?", re.I
+    r"\$\s*([\d][\d,]*\.?\d*)\s*(?:/|per)\s*1(?:[,.]?000)?\s*[Kk]?\b", re.I
 )
 # "$30,000 of $120,000", "$30K of $120K paid"
 _OF_RE = re.compile(
@@ -84,7 +84,7 @@ class Discovered:
     url: str = ""
 
     def to_campaign(self) -> Campaign:
-        slug = re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")[:48]
+        slug = slugify(self.title)
         return Campaign(
             id=f"disc:{slug}",
             source="manual",  # provenance: parsed from the web feed, not the API
@@ -199,9 +199,8 @@ def diagnose(html: str) -> str:
 def parse_discover(html: str) -> list[Discovered]:
     found = _from_embedded_json(html)
     if not found:
-        found = _from_split_cards(_visible_lines(html))
-    if not found:
-        found = _from_visible_text(html)
+        lines = _visible_lines(html)  # one strip pass shared by both strategies
+        found = _from_split_cards(lines) or _from_visible_text(lines)
     return _dedupe(found)
 
 
@@ -333,7 +332,7 @@ def card_contexts(html: str, before: int = 8, after: int = 9) -> list[list[str]]
 #   $41,370       <- paid out so far
 #   /$50,000      <- total budget
 _AMOUNT_LINE = re.compile(r"^\$([\d][\d,]*\.?\d*)\s*([KkMm])?$")
-_UNIT_LINE = re.compile(r"^/\s*1[,.]?0?0?0?\s*[Kk]?$")
+_UNIT_LINE = re.compile(r"^/\s*1(?:[,.]?000)?\s*[Kk]?$")
 _TOTAL_LINE = re.compile(r"^/\$([\d][\d,]*\.?\d*)\s*([KkMm])?$")
 _AGE_LINE = re.compile(r"^\d+\s*(mo|[smhdwy])$")
 
@@ -377,9 +376,8 @@ def _from_split_cards(lines: list[str]) -> list[Discovered]:
     return results
 
 
-def _from_visible_text(html: str) -> list[Discovered]:
-    """Strip markup, then read card text around each '$X / 1K' occurrence."""
-    lines = _visible_lines(html)
+def _from_visible_text(lines: list[str]) -> list[Discovered]:
+    """Read card text around each '$X / 1K' occurrence in the visible lines."""
     results = []
     for i, line in enumerate(lines):
         rate_m = _RATE_RE.search(line)

@@ -14,7 +14,7 @@ def _source(w=1920, h=1080):
 
 
 def test_fit_graph_blur_pad_layout():
-    g = vertical_fit_graph(_source(), EditConfig())
+    g = vertical_fit_graph(EditConfig())
     assert "force_original_aspect_ratio=increase" in g  # bg fills
     assert "boxblur" in g
     assert "force_original_aspect_ratio=decrease" in g  # fg fits
@@ -23,14 +23,14 @@ def test_fit_graph_blur_pad_layout():
 
 
 def test_fit_graph_credit_and_cta():
-    g = vertical_fit_graph(_source(), EditConfig(), credit_text="via @forge",
+    g = vertical_fit_graph(EditConfig(), credit_text="via @forge",
                            cta_text="link in bio")
     assert "via @forge" in g and "y=60" in g       # credit at the top edge
     assert "link in bio" in g and "y=h-380" in g   # CTA above caption zone
 
 
 def test_fit_graph_escapes_drawtext():
-    g = vertical_fit_graph(_source(), EditConfig(), cta_text="100%: don't")
+    g = vertical_fit_graph(EditConfig(), cta_text="100%: don't")
     assert "100\\%" in g and "don'\\''t" in g
 
 
@@ -58,7 +58,7 @@ def fakes(monkeypatch, tmp_path):
         lambda src, dst, s, d, c: calls.setdefault("trim", (s, d)) and touch(dst) or touch(dst),
     )
 
-    def fake_fit(src, dst, source, c, credit_text=None, cta_text=None):
+    def fake_fit(src, dst, c, credit_text=None, cta_text=None):
         calls["fit"] = {"credit": credit_text, "cta": cta_text}
         return touch(dst)
 

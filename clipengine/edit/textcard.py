@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 BOLD_FONT_CANDIDATES = (
     # operator-installed clipper classics first
@@ -105,14 +105,11 @@ PRESETS: dict[str, CardStyle] = {
 
 
 def get_preset(name: str) -> CardStyle:
-    try:
-        from dataclasses import replace
-
-        return replace(PRESETS[name])
-    except KeyError:
+    if name not in PRESETS:
         raise ValueError(
             f"unknown style '{name}' - available: {', '.join(sorted(PRESETS))}"
-        ) from None
+        )
+    return replace(PRESETS[name])
 
 
 # freely-licensed fonts (OFL/Apache) fetched straight from the google/fonts repo
@@ -160,17 +157,22 @@ def install_fonts(client=None) -> list[tuple[str, str]]:
     return results
 
 
+def _preset_font(style: CardStyle) -> str | None:
+    """The preset's own font when installed, else None (caller falls back)."""
+    return next(
+        (p for c in style.font_candidates
+         if os.path.exists(p := os.path.join(FONT_DIR, c))),
+        None,
+    )
+
+
 def preset_status() -> list[tuple[str, str]]:
     """(preset, resolved font path or 'missing - system fallback') pairs."""
-    rows = []
-    for name, style in PRESETS.items():
-        path = next(
-            (p for c in style.font_candidates
-             if os.path.exists(p := os.path.join(FONT_DIR, c))),
-            None,
-        )
-        rows.append((name, path or f"missing -> fallback {find_bold_font() or 'NONE'}"))
-    return rows
+    return [
+        (name, _preset_font(style)
+         or f"missing -> fallback {find_bold_font() or 'NONE'}")
+        for name, style in PRESETS.items()
+    ]
 
 
 def available() -> bool:
@@ -235,16 +237,34 @@ def _split_highlight(line: str):
         yield line[pos:], False
 
 
+_FONT_CACHE: dict[tuple, object] = {}
+
+
+def _load_font(path: str, size: int, variation: str = ""):
+    from PIL import ImageFont
+
+    key = (path, size, variation)
+    if key not in _FONT_CACHE:
+        font = ImageFont.truetype(path, size)
+        if variation:
+            try:
+                font.set_variation_by_name(variation)
+            except Exception:  # static font / instance not present
+                pass
+        _FONT_CACHE[key] = font
+    return _FONT_CACHE[key]
+
+
 def _emoji_image(cluster: str, target: int):
     """Render an emoji run at a native strike size, scaled to the line."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     path = find_emoji_font()
     if not path:
         return None
     for strike in _EMOJI_STRIKES:
         try:
-            font = ImageFont.truetype(path, strike)
+            font = _load_font(path, strike)
             canvas = Image.new("RGBA", (strike * (len(cluster) + 1), int(strike * 1.4)),
                                (0, 0, 0, 0))
             ImageDraw.Draw(canvas).text((0, 0), cluster, font=font, embedded_color=True)
@@ -262,25 +282,16 @@ def _emoji_image(cluster: str, target: int):
 def render_text_card(text: str, out_png: str, width: int, style: CardStyle | None = None):
     """Render the card -> (png_path, height). Emoji without a usable emoji
     font are dropped from the card (they stay in captions), never crash."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     style = style or CardStyle()
-    font_path = next(
-        (p for c in style.font_candidates
-         if os.path.exists(p := os.path.join(FONT_DIR, c))),
-        None,
-    ) or find_bold_font()
+    font_path = _preset_font(style) or find_bold_font()
     if font_path is None:
         raise RuntimeError(
             "no bold font found - run 'clipengine fonts install', or set "
             "CLIPENGINE_FONT_FILE to a .ttf (Montserrat ExtraBold recommended)"
         )
-    font = ImageFont.truetype(font_path, style.font_size)
-    if style.variation:
-        try:
-            font.set_variation_by_name(style.variation)
-        except Exception:  # static font / instance not present - use as loaded
-            pass
+    font = _load_font(font_path, style.font_size, style.variation)
     if style.uppercase:
         text = text.upper()
     stroke_w = max(2, int(style.font_size * style.stroke_frac))
@@ -303,25 +314,24 @@ def render_text_card(text: str, out_png: str, width: int, style: CardStyle | Non
                 runs.append(("text", run, hl))
         if not runs:
             continue
-        total = sum(
+        widths = [
             run.width if kind == "emoji" else draw.textlength(run, font=font)
             for kind, run, _hl in runs
-        )
-        x = max(0, (width - int(total)) // 2)
+        ]
+        x = max(0, (width - int(sum(widths))) // 2)
         y = i * line_h + stroke_w
-        for kind, run, hl in runs:
+        for (kind, run, hl), run_w in zip(runs, widths):
             if kind == "emoji":
                 img.alpha_composite(run, (int(x), y + (style.font_size - emoji_h) // 2))
-                x += run.width
-                continue
-            dx, dy, alpha = style.shadow
-            draw.text((x + dx, y + dy), run, font=font,
-                      fill=(0, 0, 0, alpha), stroke_width=stroke_w,
-                      stroke_fill=(0, 0, 0, alpha))
-            draw.text((x, y), run, font=font,
-                      fill=style.highlight if hl else style.fill,
-                      stroke_width=stroke_w, stroke_fill=style.stroke)
-            x += draw.textlength(run, font=font)
+            else:
+                dx, dy, alpha = style.shadow
+                draw.text((x + dx, y + dy), run, font=font,
+                          fill=(0, 0, 0, alpha), stroke_width=stroke_w,
+                          stroke_fill=(0, 0, 0, alpha))
+                draw.text((x, y), run, font=font,
+                          fill=style.highlight if hl else style.fill,
+                          stroke_width=stroke_w, stroke_fill=style.stroke)
+            x += run_w
 
     img.save(out_png)
     return out_png, height

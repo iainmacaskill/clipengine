@@ -103,8 +103,35 @@ def vertical_graph(
     return graph
 
 
+def _encode(src: str, dst: str, graph: str, cfg: EditConfig,
+            extra_inputs: list[str] | None = None, audio: str = "aac") -> str:
+    """One shared ffmpeg invocation for every filter-graph encode."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
+            *(extra_inputs or []),
+            "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
+            "-pix_fmt", "yuv420p", "-c:a", audio, dst,
+        ],
+        check=True,
+    )
+    return dst
+
+
+def _drawtext_line(text: str, fontsize: int, y: str,
+                   colour: str = "white@0.9", borderw: int = 3) -> str:
+    """One drawtext snippet used by both graph builders - keeps the escaping
+    contract (quote-break apostrophes) in a single place."""
+    return (
+        f"drawtext=text='{escape_drawtext(text)}'"
+        f":font=Sans:fontsize={fontsize}"
+        f":fontcolor={colour}:borderw={borderw}:bordercolor=black@0.9"
+        f":x=(w-tw)/2:y={y}"
+    )
+
+
 def vertical_fit_graph(
-    source: SourceVideo,
     cfg: EditConfig,
     credit_text: str | None = None,
     cta_text: str | None = None,
@@ -121,18 +148,13 @@ def vertical_fit_graph(
         f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]"
     )
     if credit_text:
-        graph += (
-            f";[v]drawtext=text='{escape_drawtext(credit_text)}'"
-            f":font=Sans:fontsize={cfg.credit_font_size}"
-            f":fontcolor=white@0.9:borderw=3:bordercolor=black@0.9"
-            f":x=(w-tw)/2:y=60[v]"
-        )
+        graph += ";[v]" + _drawtext_line(credit_text, cfg.credit_font_size, "60") + "[v]"
     if cta_text:
         graph += (
-            f";[v]drawtext=text='{escape_drawtext(cta_text)}'"
-            f":font=Sans:fontsize={cfg.credit_font_size + 6}"
-            f":fontcolor=white:borderw=4:bordercolor=black"
-            f":x=(w-tw)/2:y=h-380[v]"
+            ";[v]"
+            + _drawtext_line(cta_text, cfg.credit_font_size + 6, "h-380",
+                             colour="white", borderw=4)
+            + "[v]"
         )
     return graph
 
@@ -140,23 +162,13 @@ def vertical_fit_graph(
 def vertical_fit(
     src: str,
     dst: str,
-    source: SourceVideo,
     cfg: EditConfig,
     credit_text: str | None = None,
     cta_text: str | None = None,
 ) -> str:
     """Reformat any aspect ratio to 9:16 with a blurred self-fill (no facecam)."""
-    graph = vertical_fit_graph(source, cfg, credit_text=credit_text, cta_text=cta_text)
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
-            "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
-            "-pix_fmt", "yuv420p", "-c:a", "aac", dst,
-        ],
-        check=True,
-    )
-    return dst
+    graph = vertical_fit_graph(cfg, credit_text=credit_text, cta_text=cta_text)
+    return _encode(src, dst, graph, cfg)
 
 
 def vertical(
@@ -169,16 +181,7 @@ def vertical(
 ) -> str:
     """Reformat 16:9 -> 9:16: facecam scaled into the top tile, gameplay centre-crop below."""
     graph = vertical_graph(source, facecam, cfg, credit_text=credit_text)
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
-            "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
-            "-pix_fmt", "yuv420p", "-c:a", "aac", dst,
-        ],
-        check=True,
-    )
-    return dst
+    return _encode(src, dst, graph, cfg)
 
 
 def overlay_cards(
@@ -204,16 +207,8 @@ def overlay_cards(
             f"[{prev}][{i}:v]overlay=(W-w)/2:{y_frac:.3f}*H{enable}[{label}]"
         )
         prev = label
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-loglevel", "error", *inputs,
-            "-filter_complex", ";".join(chains), "-map", "[v]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
-            "-pix_fmt", "yuv420p", "-c:a", "copy", dst,
-        ],
-        check=True,
-    )
-    return dst
+    return _encode(src, dst, ";".join(chains), cfg,
+                   extra_inputs=inputs[2:], audio="copy")
 
 
 def burn_hook(src: str, dst: str, hook_text: str, cfg: EditConfig) -> str:
