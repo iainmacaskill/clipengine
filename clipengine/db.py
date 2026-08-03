@@ -21,6 +21,7 @@ class SqliteStore:
 
     def __init__(self, db_path: str):
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        self.path = db_path  # so callers can reopen on another thread
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         if self.SCHEMA:

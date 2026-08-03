@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clip Studio</title>
+<style>
+@font-face{font-family:'Archivo Black';src:url(fonts/archivoblack.woff2) format('woff2');font-weight:400;font-display:swap;}
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --ink:#16151A;--panel:#1F1D24;--panel2:#26232D;--line:#34313D;--text:#EDEAF2;
+  --muted:#9B96A8;--accent:#FFD400;--accent-ink:#171402;--good:#4ADE80;--bad:#F87171;--warn:#F5A623;
+  --display:'Archivo Black','Arial Black',sans-serif;
+  --body:'Helvetica Neue','Segoe UI',system-ui,sans-serif;
+}
+html{color-scheme:dark;}
+body{background:var(--ink);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+.frame{max-width:1080px;margin:0 auto;padding:0 20px 130px;}
+.num{font-variant-numeric:tabular-nums;}
+.topbar{display:flex;align-items:center;gap:14px;padding:18px 0 14px;border-bottom:1px solid var(--line);}
+.logo{font-family:var(--display);font-size:17px;letter-spacing:.5px;background:var(--accent);color:var(--accent-ink);padding:5px 10px 4px;border-radius:6px;}
+.topbar .ctx{color:var(--muted);font-size:13px;}
+.topbar .ctx b{color:var(--text);font-weight:600;}
+.stepper{display:flex;gap:6px;padding:18px 0 26px;overflow-x:auto;}
+.step{flex:1;min-width:112px;text-align:left;cursor:pointer;border:0;background:none;color:var(--muted);font-family:var(--body);padding:0;}
+.step .bar{height:4px;border-radius:2px;background:var(--line);margin-bottom:8px;}
+.step.done .bar,.step.here .bar{background:var(--accent);}
+.step.here{color:var(--text);}
+.step .n{font-family:var(--display);font-size:11px;letter-spacing:.1em;display:block;}
+.step .t{font-size:12.5px;}
+.step:disabled{opacity:.45;cursor:not-allowed;}
+.step:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px;}
+.screen{display:none;}
+.screen.on{display:block;}
+h1{font-family:var(--display);font-weight:400;font-size:30px;line-height:1.15;text-wrap:balance;margin-bottom:6px;}
+.sub{color:var(--muted);max-width:64ch;margin-bottom:24px;}
+.sub b{color:var(--text);font-weight:600;}
+h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:24px 0 12px;}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;border-radius:99px;padding:3px 10px;white-space:nowrap;}
+.pill.new{background:var(--accent);color:var(--accent-ink);}
+.pill.ok{background:rgba(74,222,128,.14);color:var(--good);}
+.pill.no{background:rgba(248,113,113,.14);color:var(--bad);}
+.pill.dim{background:var(--panel2);color:var(--muted);}
+.pill.run{background:rgba(245,166,35,.14);color:var(--warn);}
+.camp{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+.camp .money{font-family:var(--display);font-size:24px;min-width:118px;}
+.camp .money small{display:block;font-family:var(--body);font-size:11px;color:var(--muted);font-weight:400;letter-spacing:.05em;}
+.camp .who{flex:1;min-width:220px;}
+.camp .who .brand{font-weight:600;font-size:16px;}
+.camp .who .desc{color:var(--muted);font-size:13.5px;}
+.score{text-align:right;font-size:12.5px;color:var(--muted);}
+.score b{color:var(--text);}
+.btn{font-family:var(--body);font-weight:600;font-size:14px;cursor:pointer;border-radius:8px;padding:9px 16px;border:1px solid var(--line);background:var(--panel2);color:var(--text);}
+.btn:hover{border-color:var(--muted);}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+.btn.small{font-size:12.5px;padding:6px 11px;}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
+.cols{display:grid;grid-template-columns:1fr 1.4fr;gap:12px;}
+@media(max-width:760px){.cols{grid-template-columns:1fr;}}
+.deal-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;}
+.deal-row:last-child{border-bottom:0;}
+.deal-row span{color:var(--muted);}
+.rule{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);align-items:baseline;}
+.rule:last-child{border-bottom:0;}
+.rule .mark{font-weight:700;width:16px;flex:none;}
+.rule .mark.y{color:var(--good);}.rule .mark.n{color:var(--bad);}
+.rule .auto{margin-left:auto;flex:none;}
+.src{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.src .meta{flex:1;min-width:200px;}
+.src .meta .name{font-weight:600;}
+.src .meta .url{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere;}
+input[type=text]{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);font-family:var(--body);font-size:14.5px;padding:9px 12px;}
+input[type=text]:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent;}
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;font-weight:600;}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.moment{display:flex;gap:14px;align-items:flex-start;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px;}
+.moment:hover{border-color:var(--muted);}
+.moment.sel{border-color:var(--accent);}
+.moment .box{width:20px;height:20px;border-radius:5px;border:1.5px solid var(--muted);flex:none;margin-top:2px;display:grid;place-items:center;font-size:13px;font-weight:700;color:var(--accent-ink);}
+.moment.sel .box{background:var(--accent);border-color:var(--accent);}
+.moment.sel .box::after{content:"✓";}
+.moment .when{font-size:12.5px;color:var(--muted);display:flex;gap:10px;}
+.moment .quote{font-size:14px;margin-top:2px;}
+.styles{display:flex;gap:8px;flex-wrap:wrap;}
+.stylechip{cursor:pointer;border:1.5px solid var(--line);border-radius:8px;padding:7px 12px;font-size:13px;background:var(--ink);color:var(--text);font-family:var(--body);text-transform:capitalize;}
+.stylechip.sel{border-color:var(--accent);background:var(--panel2);}
+.caption-preview{background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:11px 12px;font-size:14px;line-height:1.7;}
+.tok{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:0 7px;font-size:13px;color:var(--accent);font-weight:600;}
+.job{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--line);}
+.job:last-child{border-bottom:0;}
+.job .id{font-family:var(--display);font-size:12px;width:80px;flex:none;overflow-wrap:anywhere;}
+.job .track{flex:1;height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;}
+.job .track i{display:block;height:100%;width:0;background:var(--accent);border-radius:3px;transition:width .3s linear;}
+.job .state{width:110px;flex:none;text-align:right;font-size:12.5px;color:var(--muted);}
+.hint{font-size:12.5px;color:var(--muted);margin-top:6px;}
+.err{color:var(--bad);font-size:13px;margin-top:8px;}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 16px;font-size:13.5px;opacity:0;transition:opacity .2s;pointer-events:none;}
+.toast.show{opacity:1;}
+.actionbar{position:fixed;bottom:0;left:0;right:0;background:color-mix(in srgb,var(--ink) 88%,transparent);backdrop-filter:blur(8px);border-top:1px solid var(--line);}
+.actionbar .in{max-width:1080px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:16px;}
+.actionbar .status{color:var(--muted);font-size:13.5px;flex:1;}
+.empty{color:var(--muted);padding:20px 0;}
+@media(prefers-reduced-motion:reduce){.job .track i{transition:none;}}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="topbar">
+    <span class="logo">CLIP STUDIO</span>
+    <span class="ctx" id="ctx">No campaign selected</span>
+  </div>
+  <div class="stepper" id="stepper" role="tablist">
+    <button class="step" data-go="0"><span class="bar"></span><span class="n">STEP 1</span><span class="t">New campaign</span></button>
+    <button class="step" data-go="1"><span class="bar"></span><span class="n">STEP 2</span><span class="t">The rules</span></button>
+    <button class="step" data-go="2"><span class="bar"></span><span class="n">STEP 3</span><span class="t">Source videos</span></button>
+    <button class="step" data-go="3"><span class="bar"></span><span class="n">STEP 4</span><span class="t">Best moments</span></button>
+    <button class="step" data-go="4"><span class="bar"></span><span class="n">STEP 5</span><span class="t">Make the clips</span></button>
+    <button class="step" data-go="5"><span class="bar"></span><span class="n">STEP 6</span><span class="t">Ready to post</span></button>
+  </div>
+
+  <section class="screen" id="s0">
+    <h1>Campaigns</h1>
+    <p class="sub">Campaigns from the hourly Whop scan, ranked by pay rate, budget left, and how simple the rules are. Pick one to start clipping.</p>
+    <div id="campaignList"><div class="empty">Loading…</div></div>
+    <h2>Add one manually</h2>
+    <div class="card">
+      <div class="field"><label>Title</label><input type="text" id="newTitle" placeholder="Frida — Chelsea Hirschhorn"></div>
+      <div class="row">
+        <div class="field" style="flex:1;min-width:120px;margin:0"><label>Pays / 1k views ($)</label><input type="text" id="newCpm" placeholder="2.00"></div>
+        <div class="field" style="flex:1;min-width:120px;margin:0"><label>Budget ($)</label><input type="text" id="newBudget" placeholder="5000"></div>
+        <div class="field" style="flex:1;min-width:120px;margin:0"><label>Platforms</label><input type="text" id="newPlatforms" placeholder="tiktok"></div>
+      </div>
+      <div class="field" style="margin-top:14px"><label>Rules / brief (paste the brand's rules)</label><input type="text" id="newRules" placeholder="Tag @fridamom. Identify Chelsea Hirschhorn as CEO and Founder. Min 10s. TikTok. #ad"></div>
+      <button class="btn primary" id="addCampaignBtn">Add campaign</button>
+      <div class="err" id="addCampaignErr"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s1">
+    <h1>The rules, translated</h1>
+    <p class="sub">Everything the brand requires, read from their brief. The parts marked <b>automatic</b> go into every caption and are checked on every clip before it can be exported.</p>
+    <div class="cols">
+      <div class="card"><h2 style="margin-top:0">The deal</h2><div id="dealBox"></div></div>
+      <div class="card"><h2 style="margin-top:0">Every clip must</h2><div id="ruleBox"></div></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s2">
+    <h1>Source videos</h1>
+    <p class="sub">Add the brand's approved videos. Each is downloaded and transcribed <b>once</b>, then every clip you cut from it reuses that transcript. Links off the approved list are refused.</p>
+    <div id="sourceList"></div>
+    <div class="card">
+      <div class="field"><label>Paste an approved link, or a file path already on this machine</label><input type="text" id="srcInput" placeholder="https://youtube.com/watch?v=…  or  /Users/you/clipengine/newcampaign/goop.mp4"></div>
+      <button class="btn" id="addSourceBtn">Add source</button>
+      <div class="err" id="addSourceErr"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="s3">
+    <h1>Best moments</h1>
+    <p class="sub">Each prepared video is scanned for its hottest stretches, and you read what's actually said before choosing. Tap to keep or drop a moment.</p>
+    <div id="momentArea"><div class="empty">Prepare a source on the previous step, then detect its moments.</div></div>
+  </section>
+
+  <section class="screen" id="s4">
+    <h1>Make the clips</h1>
+    <p class="sub">Each chosen moment becomes a clip. Put <b>*stars*</b> around one hook word to highlight it. Cuts snap to full sentences, and the required caption parts are locked in.</p>
+    <div id="clipArea"></div>
+  </section>
+
+  <section class="screen" id="s5">
+    <h1 id="readyTitle">Rendering…</h1>
+    <p class="sub">Each clip is cut, reframed for TikTok, captioned, and stamped with its hook in one pass — then checked against the campaign rules before it lands here.</p>
+    <div class="card" id="renderCard"></div>
+    <div id="readyList"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="actionbar"><div class="in">
+  <span class="status" id="statusline"></span>
+  <button class="btn" id="backBtn">Back</button>
+  <button class="btn primary" id="nextBtn">Continue</button>
+</div></div>
+
+<script>
+const S = {
+  step: 0, campaign: null, checklist: null, campaignFull: null,
+  sources: [], moments: [], clips: [], presets: ['clean'], results: [],
+};
+const $ = s => document.querySelector(s);
+const api = {
+  async get(p){ const r = await fetch(p); return r.json(); },
+  async post(p, b){ const r = await fetch(p, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b||{})}); return {status:r.status, body:await r.json()}; },
+};
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function hookHTML(h){ return esc(h).replace(/\*(.+?)\*/g,'<b style="color:var(--accent)">$1</b>'); }
+
+async function pollJob(id, onProgress){
+  while(true){
+    const j = await api.get('/api/jobs/'+id);
+    if(onProgress) onProgress(j);
+    if(j.status==='done') return j.result;
+    if(j.status==='error') throw new Error(j.message||j.error||'job failed');
+    await new Promise(r=>setTimeout(r, 700));
+  }
+}
+
+// ---- Step 1: campaigns ----
+async function loadCampaigns(){
+  const {campaigns} = await api.get('/api/campaigns');
+  const list = $('#campaignList');
+  if(!campaigns.length){ list.innerHTML='<div class="empty">No campaigns yet — add one below, or run a sync.</div>'; return; }
+  list.innerHTML = campaigns.map(c=>`
+    <div class="card"><div class="camp">
+      <div class="money num">$${(+c.reward_amount).toFixed(2)}<small>PER 1,000 VIEWS</small></div>
+      <div class="who"><div class="brand">${esc(c.title)} ${c.status==='open'?'<span class="pill ok">OPEN</span>':'<span class="pill dim">'+esc(c.status)+'</span>'}</div>
+        <div class="desc">${esc(c.brand||'')} · budget left $${Math.round(c.budget_remaining).toLocaleString()}</div></div>
+      <div class="score">Fit <b class="num">${c.score}</b></div>
+      <button class="btn primary" data-pick="${esc(c.id)}">Open</button>
+    </div></div>`).join('');
+  list.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>pickCampaign(b.getAttribute('data-pick')));
+}
+async function pickCampaign(id){
+  const full = await api.get('/api/campaigns/'+encodeURIComponent(id));
+  if(!full || full.error || !full.checklist){ toast('Could not open campaign'); return; }
+  S.campaignFull = full;
+  S.campaign = id; S.checklist = S.campaignFull.checklist;
+  S.moments = []; S.clips = []; S.results = [];
+  await loadSources();
+  $('#ctx').innerHTML = 'Campaign: <b>'+esc(S.campaignFull.title)+'</b> · pays <b>$'+(+S.campaignFull.reward_amount).toFixed(2)+' / 1,000 views</b>';
+  go(1);
+}
+
+// ---- Step 2: rules ----
+function renderRules(){
+  const c = S.campaignFull, ck = S.checklist;
+  const dur = ck.min_duration_s ? ck.min_duration_s+'s minimum' : 'no minimum';
+  $('#dealBox').innerHTML = `
+    <div class="deal-row"><span>Pays</span><b class="num">$${(+c.reward_amount).toFixed(2)} / 1,000 views</b></div>
+    <div class="deal-row"><span>Platform</span><b>${(ck.platforms.join(', ')||'any').toUpperCase()}</b></div>
+    <div class="deal-row"><span>Clip length</span><b class="num">${dur}</b></div>
+    <div class="deal-row"><span>Budget left</span><b class="num">$${Math.round(c.budget_remaining).toLocaleString()}</b></div>`;
+  const auto = '<span class="pill dim auto">automatic</span>';
+  let rows = ck.hashtags.map(h=>`<div class="rule"><span class="mark y">✓</span><span>Include <b>#${esc(h)}</b> in the caption</span>${auto}</div>`);
+  rows = rows.concat(ck.mentions.map(m=>`<div class="rule"><span class="mark y">✓</span><span>Tag <b>@${esc(m)}</b></span>${auto}</div>`));
+  if(ck.links.length) rows.push(`<div class="rule"><span class="mark y">✓</span><span>Use only the ${ck.links.length} approved source video(s)</span><span class="pill dim auto">checked</span></div>`);
+  rows = rows.concat(ck.required.map(r=>`<div class="rule"><span class="mark y">✓</span><span>${esc(r)}</span></div>`));
+  rows = rows.concat(ck.banned.map(r=>`<div class="rule"><span class="mark n">✕</span><span>${esc(r)}</span></div>`));
+  $('#ruleBox').innerHTML = rows.join('') || '<div class="empty">No structured rules parsed from the brief.</div>';
+}
+
+// ---- Step 3: sources ----
+async function loadSources(){
+  const {sources} = await api.get('/api/campaigns/'+encodeURIComponent(S.campaign)+'/sources');
+  S.sources = sources; renderSources();
+}
+function renderSources(){
+  const list = $('#sourceList');
+  if(!S.sources.length){ list.innerHTML=''; return; }
+  const badge = s => ({ready:'<span class="pill ok">Ready</span>',pending:'<span class="pill dim">Not prepared</span>',
+    downloading:'<span class="pill run">Downloading…</span>',transcribing:'<span class="pill run">Transcribing…</span>',
+    error:'<span class="pill no">Error</span>'}[s.status]||'');
+  list.innerHTML = S.sources.map(s=>`<div class="card"><div class="src">
+    <div class="meta"><div class="name">${esc(s.title||s.url||s.path).split('/').pop()}</div>
+      <div class="url">${esc(s.url||s.path)} ${s.detail?'· '+esc(s.detail):''}</div></div>
+    <div class="row">${badge(s)}
+      ${s.status==='ready'
+        ? `<button class="btn small" data-detect="${s.id}">Find moments</button>`
+        : `<button class="btn small primary" data-prep="${s.id}">Prepare</button>`}</div>
+  </div></div>`).join('');
+  list.querySelectorAll('[data-prep]').forEach(b=>b.onclick=()=>prepareSource(+b.getAttribute('data-prep'), b));
+  list.querySelectorAll('[data-detect]').forEach(b=>b.onclick=()=>detectSource(+b.getAttribute('data-detect'), b));
+}
+async function addSource(){
+  const v = $('#srcInput').value.trim(); if(!v) return;
+  const isLink = /^https?:\/\//i.test(v);
+  const {status, body} = await api.post('/api/sources', {campaign_id:S.campaign, [isLink?'url':'path']:v});
+  if(status>=400){ $('#addSourceErr').textContent = body.error + (body.approved&&body.approved.length?' Approved: '+body.approved.join(', '):''); return; }
+  $('#addSourceErr').textContent=''; $('#srcInput').value=''; await loadSources();
+}
+async function prepareSource(id, btn){
+  btn.disabled=true; btn.textContent='Preparing…';
+  const {body} = await api.post('/api/sources/'+id+'/prepare', {});
+  try{ await pollJob(body.id, j=>btn.textContent=j.message||'working…'); }
+  catch(e){ toast('Prepare failed: '+e.message); }
+  await loadSources();
+}
+async function detectSource(id, btn){
+  btn.disabled=true; btn.textContent='Scanning…';
+  const {body} = await api.post('/api/sources/'+id+'/detect', {top:8});
+  try{
+    const res = await pollJob(body.id, j=>btn.textContent=j.message||'working…');
+    const src = S.sources.find(s=>s.id===id);
+    res.moments.forEach(m=>{ m.source_id=id; m.source_title=(src&&(src.title||src.url||src.path))||('source '+id); m.selected=true; });
+    S.moments = S.moments.filter(m=>m.source_id!==id).concat(res.moments);
+    toast(res.moments.length+' moments found'); go(3);
+  }catch(e){ toast('Detect failed: '+e.message); btn.disabled=false; btn.textContent='Find moments'; }
+}
+
+// ---- Step 4: moments ----
+function renderMoments(){
+  const area = $('#momentArea');
+  if(!S.moments.length){ area.innerHTML='<div class="empty">No moments yet — go back and detect a prepared source.</div>'; return; }
+  const groups = {};
+  S.moments.forEach((m,i)=>{ (groups[m.source_title]=groups[m.source_title]||[]).push(i); });
+  area.innerHTML = Object.entries(groups).map(([title, idxs])=>`
+    <h2>${esc(title.split('/').pop())}</h2>
+    ${idxs.map(i=>{const m=S.moments[i];return `
+      <div class="moment ${m.selected?'sel':''}" data-m="${i}">
+        <span class="box"></span>
+        <div class="body"><div class="when"><span class="num">${fmt(m.start)}–${fmt(m.end)}</span><span>heat ${m.score}</span></div>
+          <div class="quote">${esc(m.excerpt)||'<i style="color:var(--muted)">no speech detected here</i>'}</div></div>
+      </div>`;}).join('')}`).join('');
+  area.querySelectorAll('[data-m]').forEach(el=>el.onclick=()=>{const i=+el.getAttribute('data-m');S.moments[i].selected=!S.moments[i].selected;el.classList.toggle('sel');setStatus();});
+}
+function fmt(s){ s=Math.round(s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+
+// ---- Step 5: clip builder ----
+function buildClips(){
+  const chosen = S.moments.filter(m=>m.selected);
+  S.clips = chosen.map((m,i)=>({
+    source_id:m.source_id, start:m.start, end:m.end,
+    hook: S.clips[i]&&S.clips[i].hook!==undefined ? S.clips[i].hook : (m.excerpt.split(/[.!?]/)[0]||'').trim().slice(0,48).toLowerCase(),
+    style: S.clips[i]?S.clips[i].style:S.presets[Math.min(i,S.presets.length-1)]||'clean',
+    caption: S.clips[i]?S.clips[i].caption:'', out_name:'clip'+(i+1), platform:(S.checklist.platforms[0]||'tiktok'),
+  }));
+}
+function renderClips(){
+  buildClips();
+  const suffix = S.campaignFull.caption_suffix || '';
+  const area = $('#clipArea');
+  if(!S.clips.length){ area.innerHTML='<div class="empty">No moments selected — go back to step 4.</div>'; return; }
+  area.innerHTML = S.clips.map((c,i)=>`
+    <div class="card">
+      <div class="row" style="margin-bottom:12px"><span style="font-family:var(--display);font-size:13px;color:var(--accent)">CLIP ${i+1}</span>
+        <span style="color:var(--muted);font-size:12.5px" class="num">${fmt(c.start)}–${fmt(c.end)}</span></div>
+      <div class="field"><label>Hook — the opening text</label><input type="text" data-hook="${i}" value="${esc(c.hook)}"></div>
+      <div class="field"><label>Caption</label><input type="text" data-cap="${i}" value="${esc(c.caption)}" placeholder="say something about the clip…"></div>
+      <div class="hint">Locked in automatically: ${suffix.split(' ').filter(Boolean).map(t=>'<span class="tok">'+esc(t)+'</span>').join(' ')||'<i>nothing required</i>'}</div>
+      <div class="field" style="margin-top:14px"><label>Look</label><div class="styles" data-styles="${i}">
+        ${S.presets.map(p=>`<button class="stylechip ${c.style===p?'sel':''}" data-style="${p}">${p}</button>`).join('')}
+      </div></div>
+    </div>`).join('');
+  area.querySelectorAll('[data-hook]').forEach(inp=>inp.oninput=()=>S.clips[+inp.getAttribute('data-hook')].hook=inp.value);
+  area.querySelectorAll('[data-cap]').forEach(inp=>inp.oninput=()=>S.clips[+inp.getAttribute('data-cap')].caption=inp.value);
+  area.querySelectorAll('[data-styles]').forEach(box=>{const i=+box.getAttribute('data-styles');
+    box.querySelectorAll('[data-style]').forEach(ch=>ch.onclick=()=>{box.querySelectorAll('.stylechip').forEach(x=>x.classList.remove('sel'));ch.classList.add('sel');S.clips[i].style=ch.getAttribute('data-style');});});
+}
+
+// ---- Step 6: render ----
+async function startRender(){
+  $('#readyTitle').textContent='Rendering…';
+  $('#readyList').innerHTML='';
+  const card = $('#renderCard'); card.style.display='';
+  card.innerHTML = S.clips.map((c,i)=>`<div class="job" data-job="${i}"><span class="id">CLIP ${i+1}</span><div class="track"><i></i></div><span class="state">queued</span></div>`).join('');
+  const {body} = await api.post('/api/render', {clips:S.clips});
+  try{
+    const res = await pollJob(body.id, j=>{
+      const n=S.clips.length, doneFrac=j.progress;
+      card.querySelectorAll('[data-job]').forEach((row,idx)=>{
+        const bar=row.querySelector('i'), st=row.querySelector('.state');
+        if(idx < Math.floor(doneFrac*n)){ bar.style.width='100%'; st.textContent='done'; }
+        else if(idx===Math.floor(doneFrac*n)){ bar.style.width='60%'; st.textContent=j.message||'rendering…'; }
+      });
+    });
+    S.results = res.clips; renderReady();
+  }catch(e){ toast('Render failed: '+e.message); }
+}
+function renderReady(){
+  $('#renderCard').style.display='none';
+  const passed = S.results.filter(r=>r.gate&&r.gate.passed).length;
+  $('#readyTitle').textContent='Ready to post';
+  $('#statusline').textContent = S.results.length+' files ready · '+passed+' passed the compliance check';
+  $('#readyList').innerHTML = S.results.map(r=>{
+    if(r.error) return `<div class="card"><b>${esc(r.out_name)}</b> <span class="pill no">Failed</span><div class="err">${esc(r.error)}</div></div>`;
+    const g=r.gate; const badge = !g?'' : g.passed?'<span class="pill ok">PASSED CHECK</span>':'<span class="pill no">'+g.failures.length+' TO FIX</span>';
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between"><div><b>${esc((r.path||'').split('/').pop())}</b> <span style="color:var(--muted);font-size:12.5px" class="num">${fmt(r.start)}–${fmt(r.end)} · ${esc(r.style)}</span> ${badge}</div></div>
+      <div class="sub" style="margin:8px 0 10px">${esc(r.caption)}</div>
+      ${g&&!g.passed?'<div class="err">'+g.failures.map(esc).join('<br>')+'</div>':''}
+      <div class="row">
+        <button class="btn small" data-copy="${esc(r.caption)}">Copy caption</button>
+        <button class="btn small primary" data-post="${esc(r.path)}">Mark as posted</button>
+      </div></div>`;
+  }).join('');
+  $('#readyList').querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(b.getAttribute('data-copy'));b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy caption',1500);});
+  $('#readyList').querySelectorAll('[data-post]').forEach(b=>b.onclick=async()=>{
+    const url = prompt('Paste the TikTok post URL to start tracking it:'); if(!url) return;
+    const {status, body} = await api.post('/api/submissions', {campaign_id:S.campaign, post_url:url, platform:'tiktok'});
+    if(status>=400){ toast(body.error); return; }
+    b.outerHTML='<span style="color:var(--good);font-weight:600">Posted — tracking views &amp; payout</span>';
+  });
+}
+
+// ---- navigation ----
+const NEXT=['Open a campaign','Accept — these rules are now automatic','Go to moments','Build the clips','Render '+'', 'Done — back to campaigns'];
+function setStatus(){
+  const sel = S.moments.filter(m=>m.selected).length;
+  const msgs=[
+    'Pick a campaign to begin',
+    'Accepting bakes the required tags into every caption',
+    (S.sources.length? S.sources.filter(s=>s.status==='ready').length+' of '+S.sources.length+' sources ready':'Add the approved videos'),
+    sel+' moment'+(sel===1?'':'s')+' selected',
+    S.clips.length+' clips · captions and checks are automatic',
+    '',
+  ];
+  $('#statusline').textContent = msgs[S.step];
+  $('#nextBtn').textContent = S.step===4 ? 'Render '+S.moments.filter(m=>m.selected).length+' clips' : (NEXT[S.step]||'Continue');
+}
+function go(n){
+  S.step=n;
+  document.querySelectorAll('.step').forEach((s,i)=>{s.classList.toggle('here',i===n);s.classList.toggle('done',i<n);s.disabled = i>0 && !S.campaign;});
+  document.querySelectorAll('.screen').forEach((s,i)=>s.classList.toggle('on',i===n));
+  $('#backBtn').style.visibility = n===0?'hidden':'visible';
+  if(n===1) renderRules();
+  if(n===2) renderSources();
+  if(n===3) renderMoments();
+  if(n===4) renderClips();
+  if(n===5) startRender();
+  setStatus(); window.scrollTo(0,0);
+}
+$('#nextBtn').onclick=()=>{ if(S.step<5) go(S.step+1); else { go(0); loadCampaigns(); } };
+$('#backBtn').onclick=()=>{ if(S.step>0) go(S.step-1); };
+document.querySelectorAll('.step').forEach(s=>s.onclick=()=>{ if(!s.disabled) go(+s.getAttribute('data-go')); });
+$('#addSourceBtn').onclick=addSource;
+$('#addCampaignBtn').onclick=async()=>{
+  const {status, body} = await api.post('/api/campaigns', {
+    title:$('#newTitle').value, cpm:$('#newCpm').value, budget:$('#newBudget').value,
+    platforms:$('#newPlatforms').value, rules_text:$('#newRules').value,
+  });
+  if(status>=400){ $('#addCampaignErr').textContent=body.error; return; }
+  $('#addCampaignErr').textContent=''; toast('Campaign added'); loadCampaigns();
+};
+
+(async function init(){
+  try{ const {presets}=await api.get('/api/presets'); if(presets&&presets.length) S.presets=presets; }catch(e){}
+  await loadCampaigns(); go(0);
+})();
+</script>
+</body>
+</html>

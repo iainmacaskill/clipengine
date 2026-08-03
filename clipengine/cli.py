@@ -153,6 +153,13 @@ def _alert_new(new_campaigns, cfg: config.Config) -> None:
         print(f"alert {'sent' if ok else 'FAILED'} ({len(alertable)} campaign(s))")
 
 
+def _cmd_web(args: argparse.Namespace, cfg: config.Config) -> int:
+    from .web.server import serve
+
+    serve(cfg, host=args.host, port=args.port)
+    return 0
+
+
 def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
     from . import pipeline
 
@@ -1329,6 +1336,11 @@ def main(argv: list[str] | None = None) -> int:
     fsub.add_parser("install", help="download the preset fonts to ~/.clipengine/fonts")
     fsub.add_parser("list", help="show each style preset's resolved font")
     p.set_defaults(func=_cmd_fonts)
+
+    p = sub.add_parser("web", help="launch the no-terminal Clip Studio UI in a browser")
+    p.add_argument("--host", default="127.0.0.1", help="bind address (default localhost)")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(func=_cmd_web)
 
     p = sub.add_parser("facecam", help="auto-detect the facecam region of a video")
     p.add_argument("video")

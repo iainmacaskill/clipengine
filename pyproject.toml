@@ -14,6 +14,9 @@ asr = ["faster-whisper>=1.0"]
 download = ["yt-dlp>=2024.4"]
 llm = ["anthropic>=0.40"]
 browser = ["playwright>=1.45"]
+# the no-terminal Clip Studio UI: the server is stdlib-only, but the full
+# workflow it drives needs transcription (asr) and link downloads (download)
+web = ["faster-whisper>=1.0", "yt-dlp>=2024.4"]
 dev = ["pytest>=8.0", "ruff>=0.4", "yt-dlp>=2024.4"]
 
 [project.scripts]
@@ -25,6 +28,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["clipengine*"]
+
+[tool.setuptools.package-data]
+"clipengine.web" = ["static/*.html", "static/fonts/*"]
 
 [tool.ruff]
 line-length = 100

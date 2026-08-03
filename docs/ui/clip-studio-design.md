@@ -1,8 +1,24 @@
 # Clip Studio — UI design for the no-terminal workflow
 
-Open `clip-studio-mockup.html` in a browser for the clickable mockup. This doc
-maps each screen to the engine pieces that already exist, so implementing the
-UI is wiring, not new pipeline work.
+`clip-studio-mockup.html` is the original clickable design mockup (static, no
+backend). The **working** version is now shipped in `clipengine/web/` and runs
+against the real engine.
+
+## Running it
+
+```bash
+pip install -e '.[web]'      # server is stdlib-only; [web] adds asr + yt-dlp
+clipengine web               # http://127.0.0.1:8765  (--host/--port to change)
+```
+
+Open the printed URL in a browser. The page talks to a small JSON API
+(`clipengine/web/api.py`) served by a dependency-free stdlib HTTP server
+(`clipengine/web/server.py`). Long tasks (download, transcribe, detect, render)
+run on background threads and the page polls `GET /api/jobs/<id>`. Source
+videos are tracked in their own `sources.db` beside `campaigns.db` — the live
+campaign store's schema is never touched.
+
+This doc maps each screen to the engine pieces it drives.
 
 ## Who it's for
 
