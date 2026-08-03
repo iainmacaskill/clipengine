@@ -104,11 +104,16 @@ def vertical_graph(
 
 
 def _encode(src: str, dst: str, graph: str, cfg: EditConfig,
-            extra_inputs: list[str] | None = None, audio: str = "aac") -> str:
-    """One shared ffmpeg invocation for every filter-graph encode."""
+            extra_inputs: list[str] | None = None, audio: str = "aac",
+            pre_input: list[str] | None = None) -> str:
+    """One shared ffmpeg invocation for every filter-graph encode.
+
+    ``pre_input`` args (e.g. -ss/-t) go before -i so seeking happens on the
+    demuxer side - that is what makes single-pass windowed renders possible."""
     subprocess.run(
         [
-            "ffmpeg", "-y", "-loglevel", "error", "-i", src,
+            "ffmpeg", "-y", "-loglevel", "error",
+            *(pre_input or []), "-i", src,
             *(extra_inputs or []),
             "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
             "-c:v", "libx264", "-preset", cfg.preset, "-crf", str(cfg.crf),
@@ -169,6 +174,58 @@ def vertical_fit(
     """Reformat any aspect ratio to 9:16 with a blurred self-fill (no facecam)."""
     graph = vertical_fit_graph(cfg, credit_text=credit_text, cta_text=cta_text)
     return _encode(src, dst, graph, cfg)
+
+
+def subtitles_filter(ass_path: str) -> str:
+    """A subtitles= filter snippet. The filename gets the filter-argument
+    escaping layer (backslash, colon, quote-break apostrophe) - distinct from
+    drawtext's text escaping."""
+    esc = ass_path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "'\\''")
+    return f"subtitles='{esc}'"
+
+
+def render_repurpose(
+    src: str,
+    dst: str,
+    cfg: EditConfig,
+    credit_text: str | None = None,
+    cta_text: str | None = None,
+    ass_path: str | None = None,
+    cards: list[tuple[str, float, float | None]] | None = None,
+    hook_text: str | None = None,
+    start: float | None = None,
+    duration: float | None = None,
+) -> str:
+    """The whole repurposed-asset render in ONE encode: demuxer-side trim,
+    fit-to-9:16 over a blurred self-fill, burned captions, text-card overlays
+    (each card is (png, y_fraction, seconds_or_None) as in ``overlay_cards``),
+    or the drawtext hook fallback when Pillow is unavailable.
+
+    Replaces the old trim -> fit -> subtitles -> overlay chain of up to four
+    generation-losing x264 passes with a single filtergraph.
+    """
+    graph = vertical_fit_graph(cfg, credit_text=credit_text, cta_text=cta_text)
+    if ass_path:
+        graph += f";[v]{subtitles_filter(ass_path)}[v]"
+    if hook_text:
+        graph += (
+            ";[v]"
+            + _drawtext_line(hook_text, 64, str(cfg.facecam_tile_height + 70),
+                             colour="white", borderw=5)
+            + ":enable='lt(t,2.5)'[v]"
+        )
+    extra_inputs: list[str] = []
+    for i, (png, y_frac, seconds) in enumerate(cards or [], start=1):
+        extra_inputs += ["-i", png]
+        enable = f":enable='lt(t,{seconds})'" if seconds else ""
+        graph += f";[v][{i}:v]overlay=(W-w)/2:{y_frac:.3f}*H{enable}[v]"
+    pre_input: list[str] = []
+    if start is not None:
+        pre_input += ["-ss", f"{start:.3f}"]
+    if duration is not None:
+        pre_input += ["-t", f"{duration:.3f}"]
+    return _encode(src, dst, graph, cfg,
+                   extra_inputs=extra_inputs, pre_input=pre_input)
 
 
 def vertical(

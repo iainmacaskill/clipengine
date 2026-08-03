@@ -13,11 +13,24 @@ import numpy as np
 from ..models import SignalSeries
 
 
-def extract_wav(video_path: str, wav_path: str, sample_rate: int = 16000) -> str:
-    """Extract mono 16 kHz PCM audio from a video with ffmpeg."""
+def extract_wav(
+    video_path: str,
+    wav_path: str,
+    sample_rate: int = 16000,
+    start: float | None = None,
+    duration: float | None = None,
+) -> str:
+    """Extract mono 16 kHz PCM audio from a video with ffmpeg, optionally only
+    the [start, start+duration) window - transcribing a clip window straight
+    from the source avoids decoding the whole master."""
+    window: list[str] = []
+    if start is not None:
+        window += ["-ss", f"{start:.3f}"]
+    if duration is not None:
+        window += ["-t", f"{duration:.3f}"]
     subprocess.run(
         [
-            "ffmpeg", "-y", "-loglevel", "error", "-i", video_path,
+            "ffmpeg", "-y", "-loglevel", "error", *window, "-i", video_path,
             "-vn", "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", wav_path,
         ],
         check=True,

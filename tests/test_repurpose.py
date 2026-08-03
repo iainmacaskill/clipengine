@@ -48,28 +48,20 @@ def cfg(tmp_path):
 def fakes(monkeypatch, tmp_path):
     calls = {}
 
-    def touch(path):
-        open(path, "w").write("clip")
-        return path
-
     monkeypatch.setattr(pipeline.edit, "probe", lambda p: _source())
+
+    def fake_render(src, dst, c, **kw):
+        calls["render"] = {"src": src, **kw}
+        open(dst, "w").write("clip")
+        return dst
+
+    monkeypatch.setattr(pipeline.edit, "render_repurpose", fake_render)
     monkeypatch.setattr(
-        pipeline.edit, "trim",
-        lambda src, dst, s, d, c: calls.setdefault("trim", (s, d)) and touch(dst) or touch(dst),
+        pipeline.audio, "extract_wav",
+        lambda v, w, start=None, duration=None: w,
     )
-
-    def fake_fit(src, dst, c, credit_text=None, cta_text=None):
-        calls["fit"] = {"credit": credit_text, "cta": cta_text}
-        return touch(dst)
-
-    monkeypatch.setattr(pipeline.edit, "vertical_fit", fake_fit)
-    monkeypatch.setattr(pipeline.audio, "extract_wav", lambda v, w: w)
     monkeypatch.setattr(
         pipeline.transcribe, "transcribe", lambda wav: Transcript(segments=[])
-    )
-    monkeypatch.setattr(
-        pipeline.edit, "burn_hook",
-        lambda src, dst, hook, c: calls.setdefault("hook", hook) and touch(dst) or touch(dst),
     )
     # these tests cover the drawtext fallback; the text-card path has its own
     monkeypatch.setattr("clipengine.edit.textcard.available", lambda: False)
@@ -77,9 +69,8 @@ def fakes(monkeypatch, tmp_path):
 
 
 def test_repurpose_textcard_path(cfg, fakes, tmp_path, monkeypatch):
-    """With Pillow available, hook + CTA become styled cards in one overlay pass."""
+    """With Pillow available, hook + CTA become styled cards in the one pass."""
     import clipengine.edit.textcard as tc
-    from clipengine.edit import ffmpeg as edit_ffmpeg
 
     monkeypatch.setattr("clipengine.edit.textcard.available", lambda: True)
     rendered = []
@@ -90,14 +81,6 @@ def test_repurpose_textcard_path(cfg, fakes, tmp_path, monkeypatch):
         return out_png, 120
 
     monkeypatch.setattr(tc, "render_text_card", fake_card)
-    overlaid = {}
-
-    def fake_overlay(src, dst, cards, c):
-        overlaid["cards"] = [(y, sec) for _p, y, sec in cards]
-        open(dst, "w").write("out")
-        return dst
-
-    monkeypatch.setattr(edit_ffmpeg, "overlay_cards", fake_overlay)
     out = pipeline.repurpose_asset(
         "asset.mp4", str(tmp_path / "out.mp4"), cfg, with_captions=False,
         hook="new *series* alert 🚨", cta="link in bio",
@@ -105,9 +88,10 @@ def test_repurpose_textcard_path(cfg, fakes, tmp_path, monkeypatch):
     assert out == str(tmp_path / "out.mp4")
     assert [t for t, _w, _s in rendered] == ["new *series* alert 🚨", "link in bio"]
     assert rendered[1][2] == 46                      # CTA renders smaller
-    assert overlaid["cards"] == [(0.12, None), (0.74, None)]  # safe zones, persistent
-    # CTA moved out of vertical_fit's drawtext and into the card pass
-    assert fakes["fit"]["cta"] is None
+    r = fakes["render"]
+    assert [(y, sec) for _p, y, sec in r["cards"]] == [(0.12, None), (0.74, None)]
+    # CTA and hook live in the card overlays, not drawtext
+    assert r["cta_text"] is None and r["hook_text"] is None
 
 
 def test_repurpose_no_speech_skips_captions(cfg, fakes, tmp_path):
@@ -116,8 +100,10 @@ def test_repurpose_no_speech_skips_captions(cfg, fakes, tmp_path):
         hook="POV: you code 10x faster", cta="link in bio", credit_text="@forge",
     )
     assert out == str(tmp_path / "out.mp4")
-    assert fakes["fit"] == {"credit": "@forge", "cta": "link in bio"}
-    assert fakes["hook"] == "POV: you code 10x faster"
+    r = fakes["render"]
+    assert r["credit_text"] == "@forge" and r["cta_text"] == "link in bio"
+    assert r["hook_text"] == "POV: you code 10x faster"
+    assert r["ass_path"] is None
 
 
 def test_repurpose_trim_window(cfg, fakes, tmp_path):
@@ -125,16 +111,17 @@ def test_repurpose_trim_window(cfg, fakes, tmp_path):
         "asset.mp4", str(tmp_path / "out.mp4"), cfg, start=3.0, end=15.0,
         with_captions=False,
     )
-    assert fakes["trim"] == (3.0, 12.0)
+    assert fakes["render"]["start"] == 3.0
+    assert fakes["render"]["duration"] == pytest.approx(12.0)
 
 
-def test_repurpose_no_hook_moves_stage_to_output(cfg, fakes, tmp_path):
+def test_repurpose_bare_renders_output(cfg, fakes, tmp_path):
     out = pipeline.repurpose_asset(
         "asset.mp4", str(tmp_path / "out.mp4"), cfg, with_captions=False,
     )
     import os
 
-    assert os.path.exists(out) and "hook" not in fakes
+    assert os.path.exists(out) and fakes["render"]["hook_text"] is None
 
 
 def test_repurpose_captions_burned_when_speech(cfg, fakes, monkeypatch, tmp_path):
@@ -145,16 +132,110 @@ def test_repurpose_captions_burned_when_speech(cfg, fakes, monkeypatch, tmp_path
     monkeypatch.setattr(
         pipeline.captions, "write_ass", lambda t, p, c: p
     )
-    burned = {}
-
-    def fake_burn(src, dst, ass, c):
-        burned["ass"] = ass
-        open(dst, "w").write("cap")
-        return dst
-
-    monkeypatch.setattr(pipeline.edit, "burn_subtitles", fake_burn)
     pipeline.repurpose_asset("asset.mp4", str(tmp_path / "out.mp4"), cfg)
-    assert "ass" in burned
+    assert fakes["render"]["ass_path"]
+
+
+def test_repurpose_uses_cached_source_transcript(cfg, fakes, tmp_path, monkeypatch):
+    """A cached master transcript is sliced to the window - Whisper must not run."""
+    import json
+
+    src = tmp_path / "asset.mp4"
+    src.write_text("video")
+    (tmp_path / "asset.mp4.transcript.json").write_text(json.dumps({"segments": [
+        {"start": 10.0, "end": 12.0, "text": "inside the window", "words": []},
+        {"start": 40.0, "end": 42.0, "text": "outside", "words": []},
+    ]}))
+    monkeypatch.setattr(
+        pipeline.transcribe, "transcribe",
+        lambda wav: (_ for _ in ()).throw(AssertionError("must not re-transcribe")),
+    )
+    written = {}
+
+    def fake_ass(t, p, c):
+        written["transcript"] = t
+        return p
+
+    monkeypatch.setattr(pipeline.captions, "write_ass", fake_ass)
+    pipeline.repurpose_asset(str(src), str(tmp_path / "out.mp4"), cfg,
+                             start=9.0, end=14.0)
+    segs = written["transcript"].segments
+    assert [s.text for s in segs] == ["inside the window"]
+    assert segs[0].start == pytest.approx(1.0)  # shifted clip-relative
+    assert fakes["render"]["ass_path"]
+
+
+# -- transcript slicing ----------------------------------------------------
+
+
+def test_slice_transcript_shifts_and_filters():
+    s = pipeline.slice_transcript(_speech(), 8.0, 27.0)
+    assert [seg.text for seg in s.segments] == [
+        "Second, longer sentence.", "Third sentence."
+    ]
+    assert s.segments[0].start == pytest.approx(0.0)
+    assert s.segments[0].end == pytest.approx(6.0)
+    assert s.segments[1].start == pytest.approx(12.0)
+
+
+def test_slice_transcript_clamps_partial_overlap_and_words():
+    from clipengine.models import Word
+
+    t = Transcript(segments=[TranscriptSegment(
+        start=5.0, end=9.0, text="four words in here",
+        words=[Word(5.0, 6.0, "four"), Word(6.0, 7.0, "words"),
+               Word(7.0, 8.0, "in"), Word(8.0, 9.0, "here")],
+    )])
+    s = pipeline.slice_transcript(t, 6.5, 8.5)
+    seg = s.segments[0]
+    assert seg.start == 0.0                      # clamped, not negative
+    assert [w.text for w in seg.words] == ["words", "in", "here"]
+    assert seg.words[0].start == 0.0
+
+
+# -- single-pass renderer --------------------------------------------------
+
+
+def test_render_repurpose_is_one_ffmpeg_call(monkeypatch):
+    from clipengine.edit import ffmpeg as ff
+
+    cmds = []
+    monkeypatch.setattr(ff.subprocess, "run", lambda cmd, check: cmds.append(cmd))
+    ff.render_repurpose(
+        "in.mp4", "out.mp4", EditConfig(), credit_text="via @x",
+        ass_path="work/captions.ass",
+        cards=[("hook.png", 0.12, None), ("cta.png", 0.74, 3.0)],
+        start=3.0, duration=12.0,
+    )
+    assert len(cmds) == 1
+    cmd = cmds[0]
+    i_src = cmd.index("-i")
+    assert cmd[i_src - 4:i_src] == ["-ss", "3.000", "-t", "12.000"]  # demuxer trim
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "subtitles='work/captions.ass'" in graph
+    assert "via @x" in graph
+    assert "0.120*H" in graph and "0.740*H" in graph
+    assert "enable='lt(t,3.0)'" in graph          # timed card
+    assert cmd.count("-i") == 3                   # source + two card PNGs
+
+
+def test_render_repurpose_hook_fallback_drawtext(monkeypatch):
+    from clipengine.edit import ffmpeg as ff
+
+    cmds = []
+    monkeypatch.setattr(ff.subprocess, "run", lambda cmd, check: cmds.append(cmd))
+    ff.render_repurpose("in.mp4", "out.mp4", EditConfig(),
+                        hook_text="you're not ready")
+    graph = cmds[0][cmds[0].index("-filter_complex") + 1]
+    assert "you'\\''re not ready" in graph        # quote-break apostrophe
+    assert "enable='lt(t,2.5)'" in graph          # hook shows over the open
+
+
+def test_subtitles_filter_escapes_path():
+    from clipengine.edit.ffmpeg import subtitles_filter
+
+    assert subtitles_filter("work/captions.ass") == "subtitles='work/captions.ass'"
+    assert subtitles_filter("C:/o'k.ass") == "subtitles='C\\:/o'\\''k.ass'"
 
 
 # -- snap-to-speech --------------------------------------------------------
@@ -228,7 +309,8 @@ def test_cli_snap_adjusts_window(cfg, fakes, tmp_path, monkeypatch, capsys):
     ])
     assert rc == 0
     assert "snapped window 10-25s -> 7.8-27.2s" in capsys.readouterr().err
-    assert fakes["trim"] == (7.8, pytest.approx(19.4))  # snapped start/duration
+    assert fakes["render"]["start"] == 7.8              # snapped start/duration
+    assert fakes["render"]["duration"] == pytest.approx(19.4)
 
 
 # -- CLI with campaign gate ------------------------------------------------

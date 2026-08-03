@@ -165,11 +165,12 @@ def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
             return 1
         caption = build_caption(caption, template_for(campaign_rec))
 
+    src_transcript = None
     if args.snap and (args.start is not None or args.end is not None):
         from .edit.ffmpeg import probe
 
         try:
-            transcript = pipeline.source_transcript(args.video, cfg)
+            src_transcript = transcript = pipeline.source_transcript(args.video, cfg)
         except RuntimeError as e:
             print(str(e), file=sys.stderr)
             return 2
@@ -203,6 +204,7 @@ def _cmd_repurpose(args: argparse.Namespace, cfg: config.Config) -> int:
         end=args.end,
         with_captions=not args.no_captions,
         style=args.style,
+        transcript=src_transcript,
     )
     print(out)
     if caption:

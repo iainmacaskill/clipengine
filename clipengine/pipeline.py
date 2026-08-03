@@ -12,7 +12,14 @@ import os
 from .config import Config
 from .detect import audio, chat, fusion, transcribe
 from .edit import ffmpeg as edit
-from .models import ClipCandidate, FacecamRegion, SignalSeries
+from .models import (
+    ClipCandidate,
+    FacecamRegion,
+    SignalSeries,
+    Transcript,
+    TranscriptSegment,
+    Word,
+)
 from .package import captions
 
 
@@ -159,6 +166,55 @@ def source_transcript(video_path: str, cfg: Config):
     return transcript
 
 
+def slice_transcript(transcript: Transcript, start: float, end: float) -> Transcript:
+    """Clip-relative view of a source transcript over the [start, end) window.
+
+    Slicing the cached master transcript replaces a per-clip Whisper run - a
+    five-variant batch over one source transcribes once, not five times.
+    """
+    segments = []
+    for s in transcript.segments:
+        if s.end <= start or s.start >= end:
+            continue
+        segments.append(TranscriptSegment(
+            start=round(max(s.start - start, 0.0), 2),
+            end=round(s.end - start, 2),
+            text=s.text,
+            words=[
+                Word(round(max(w.start - start, 0.0), 2), round(w.end - start, 2), w.text)
+                for w in s.words
+                if w.end > start and w.start < end
+            ],
+        ))
+    return Transcript(segments=segments)
+
+
+def _clip_transcript(
+    video_path: str,
+    cfg: Config,
+    transcript: Transcript | None,
+    begin: float,
+    duration: float | None,
+) -> Transcript:
+    """Transcript for a render window, cheapest source first: one handed in by
+    the caller (--snap already loaded it), then the cached master transcript,
+    then a single Whisper pass over just the window's audio."""
+    if transcript is None:
+        cache = video_path + ".transcript.json"
+        if os.path.exists(cache):
+            transcript = transcribe.load(cache)
+    if transcript is not None:
+        if begin == 0.0 and duration is None:
+            return transcript
+        end = begin + duration if duration is not None else float("inf")
+        return slice_transcript(transcript, begin, end)
+    wav = audio.extract_wav(
+        video_path, os.path.join(cfg.work_dir, "clip.wav"),
+        start=begin if begin else None, duration=duration,
+    )
+    return transcribe.transcribe(wav)
+
+
 def repurpose_asset(
     video_path: str,
     out_path: str,
@@ -171,11 +227,14 @@ def repurpose_asset(
     with_captions: bool = True,
     transcript_out: str | None = None,
     style: str = "clean",
+    transcript: Transcript | None = None,
 ) -> str:
-    """Repurpose provided asset footage (UGC/reposting campaigns): optional trim
-    -> fit-to-9:16 over a blurred self-fill (no facecam) -> captions when the
-    asset has speech -> hook burned over the open. The campaign-mandated CTA
-    and credit are drawn into the frame.
+    """Repurpose provided asset footage (UGC/reposting campaigns): trim,
+    fit-to-9:16 over a blurred self-fill (no facecam), captions when the asset
+    has speech, hook/CTA cards - all burned in one encode. ``transcript`` is
+    the full SOURCE transcript when the caller already holds it; otherwise the
+    <source>.transcript.json cache is used, and only failing that does Whisper
+    run (on just the window's audio).
     """
     from .edit import textcard
 
@@ -183,42 +242,33 @@ def repurpose_asset(
     os.makedirs(work, exist_ok=True)
     use_cards = textcard.available()  # clipper-style text cards; drawtext fallback
 
-    src = video_path
+    begin = start if start is not None else 0.0
+    duration: float | None = None
     if start is not None or end is not None:
-        begin = start or 0.0
         stop = end if end is not None else edit.probe(video_path).duration
-        src = edit.trim(video_path, os.path.join(work, "cut.mp4"), begin, stop - begin, cfg.edit)
+        duration = stop - begin
 
-    vert = edit.vertical_fit(
-        src, os.path.join(work, "vertical.mp4"), cfg.edit,
-        credit_text=credit_text, cta_text=None if use_cards else cta,
-    )
-
-    stage = vert
+    ass = None
     if with_captions:
-        clip_wav = audio.extract_wav(vert, os.path.join(work, "clip.wav"))
-        transcript = transcribe.transcribe(clip_wav)
-        if transcript.segments:  # assets without speech skip captions cleanly
+        clip_t = _clip_transcript(video_path, cfg, transcript, begin, duration)
+        if clip_t.segments:  # assets without speech skip captions cleanly
             if transcript_out:
-                transcribe.save(transcript, transcript_out)
+                transcribe.save(clip_t, transcript_out)
             ass = captions.write_ass(
-                transcript, os.path.join(work, "captions.ass"), cfg.caption
-            )
-            stage = edit.burn_subtitles(
-                vert, os.path.join(work, "captioned.mp4"), ass, cfg.edit
+                clip_t, os.path.join(work, "captions.ass"), cfg.caption
             )
 
+    # hook in the top safe zone (persistent - the clipper norm); CTA smaller,
+    # above the bottom UI zone
+    cards: list[tuple[str, float, float | None]] = []
     if use_cards and (hook or cta):
-        # hook in the top safe zone (persistent - the clipper norm); CTA
-        # smaller, above the bottom UI zone
-        overlays: list[tuple[str, float, float | None]] = []
         card_style = textcard.get_preset(style)
         if hook:
             png, _h = textcard.render_text_card(
                 hook, os.path.join(work, "hook.png"), cfg.edit.out_width - 100,
                 style=card_style,
             )
-            overlays.append((png, 0.12, None))
+            cards.append((png, 0.12, None))
         if cta:
             from dataclasses import replace as _replace
 
@@ -226,12 +276,18 @@ def repurpose_asset(
                 cta, os.path.join(work, "cta.png"), cfg.edit.out_width - 100,
                 style=_replace(card_style, font_size=46, uppercase=False),
             )
-            overlays.append((png, 0.74, None))
-        return edit.overlay_cards(stage, out_path, overlays, cfg.edit)
-    if hook:
-        return edit.burn_hook(stage, out_path, hook, cfg.edit)
-    os.replace(stage, out_path)
-    return out_path
+            cards.append((png, 0.74, None))
+
+    return edit.render_repurpose(
+        video_path, out_path, cfg.edit,
+        credit_text=credit_text,
+        cta_text=None if use_cards else cta,
+        ass_path=ass,
+        cards=cards or None,
+        hook_text=None if use_cards else hook,
+        start=start if start is not None else None,
+        duration=duration,
+    )
 
 
 def process_vod(
